@@ -1,0 +1,316 @@
+# ATHENA ANALYTICS — Contexto completo del proyecto
+
+> Este archivo es el traspaso completo del proyecto a Claude Code.
+> Léelo entero antes de tocar nada. Contiene el estado real del sistema,
+> incluyendo una auditoría que invalida parte del modelo anterior.
+
+---
+
+## 0. LO PRIMERO QUE DEBES SABER
+
+Antes de ayudar a Jaime a "mejorar el modelo", corre esto:
+
+```bash
+python athena.py --audit
+```
+
+Encontrarás que **las tres señales del modelo v4 no sobreviven una prueba
+estadística honesta**. El detalle está en la sección 5. No escondas esto ni
+lo suavices: Jaime construyó este sistema con el criterio explícito de
+eliminar señales sin fundamento estadístico (ya botó DOW, estacionalidad y
+"números atrasados" por esa razón). Esta es la continuación de ese mismo
+criterio, no una contradicción.
+
+Si Jaime quiere seguir jugando de todas formas, ayúdalo con la parte
+operativa sin fingir que el modelo predice. Son cosas separadas.
+
+---
+
+## 1. EL JUEGO
+
+**Super Kino TV** — Leidsa, República Dominicana.
+
+| Concepto | Valor |
+|---|---|
+| Pool | números 1 al 80 |
+| Bolas extraídas por sorteo | 20 |
+| Números que escoge el jugador | 10 |
+| Precio por jugada | RD$ 25 |
+| Jugadas por boleto | 3 |
+| Horario | Lun–Sáb 8:55 PM · Dom 3:55 PM |
+| P(un número específico salga) | 20/80 = **0.25** |
+
+### Tabla de premios
+
+| Aciertos | Premio |
+|---|---|
+| 10 de 10 | RD$ 25,000,000 |
+| 9 de 10 | RD$ 150,000 |
+| 8 de 10 | RD$ 10,000 |
+| 7 de 10 | RD$ 1,000 |
+| 6 de 10 | RD$ 300 |
+| 5 de 10 | RD$ 60 |
+| 1–4 | sin premio |
+| 0 de 10 | RD$ 80 devueltos |
+
+P(10 aciertos) = 1 en 1,646,492,110,120.
+**Valor esperado ≈ RD$16.88 por cada RD$25.** Ventaja de la casa ≈ 32.5%.
+Esto es estructural y no depende del modelo.
+
+### Reglas operativas conocidas
+- Leidsa **no sortea Jueves Santo ni Viernes Santo** (confirmado en varios años).
+- Jaime juega junto a **Irvin**.
+- **Loto Pool fue evaluado y descartado** (márgenes malos, sin mecanismo de
+  recuperación por cero aciertos como el de Kino). No retomar salvo que Jaime
+  lo pida. El archivo `LotoPool_20260325.csv` se deja intacto.
+
+---
+
+## 2. OBJETIVO DECLARADO DEL SISTEMA
+
+No es ganar todos los días. Es **maximizar la probabilidad de un evento de
+7–10 aciertos** — un solo golpe grande — aceptando pérdida diaria.
+
+Eso da forma a toda la estructura de jugadas: en vez de diversificar, se
+**concentra** masa de probabilidad alrededor de un núcleo de 10 números.
+
+> Nota honesta: esta estrategia es correcta *dado* que el modelo identifique
+> números con probabilidad superior a 0.25. Si todos los números son iguales
+> (que es lo que dice la auditoría), concentrar vs. diversificar no cambia
+> P(8+ aciertos) — solo cambia la varianza. Ver sección 5.
+
+---
+
+## 3. ARCHIVOS DEL PAQUETE
+
+```
+athena/
+├── CLAUDE.md                          <- este archivo
+├── AUDITORIA.md                       <- el hallazgo, en detalle
+├── athena.py                          <- motor v4 completo y ejecutable
+├── scripts/
+│   └── update_db.py                   <- actualizador desde resuloto.com
+└── data/
+    ├── kino_2010_a_hoy_COMPLETO.xlsx  <- base histórica
+    └── KinoTV_Tabla_Premios.xlsx      <- tabla de premios
+```
+
+### Formato de la base histórica
+Workbook con una hoja por año (`2010` … `2026`) más una hoja `📊 Resumen`.
+Cada fila de datos:
+
+| Col A | Col B |
+|---|---|
+| `2026-03-24  Mar` | `04, 07, 09, 10, 11, 13, 16, 18, 19, 21, 24, 32, 35, 36, 42, 58, 60, 62, 64, 69` |
+
+Las primeras 1–2 filas de cada hoja son títulos; el cargador las salta solo.
+
+**Estado de esta copia:** 5,453 filas declaradas, `2010-07-19 → 2026-03-24`.
+
+⚠️ **Existe una versión más nueva** que Jaime bajó en una sesión posterior:
+5,512 sorteos hasta el **24 de mayo de 2026**, más el workbook
+`Athena_v4_Lunes25Mayo2026.xlsx`. Esos archivos no quedaron guardados en el
+proyecto. Si Jaime los tiene, que reemplace `data/kino_2010_a_hoy_COMPLETO.xlsx`
+y corra `python scripts/update_db.py` para completar hasta hoy.
+
+---
+
+## 4. EL MOTOR (`athena.py`)
+
+### Comandos
+
+```bash
+python athena.py                        # recomendación para el próximo sorteo
+python athena.py --budget 800           # escalar al presupuesto
+python athena.py --export salida.xlsx   # workbook de 4 pestañas
+python athena.py --audit                # auditoría de señales  <-- CORRE ESTO
+python athena.py --validate             # tasas de repetición + escaneo de lags
+python athena.py --backtest 300         # aciertos del top-20 vs azar
+python athena.py --simulate 100         # simula jugadas reales y las cobra
+python athena.py --raw                  # NO deduplicar (reproduce el bug viejo)
+```
+
+Solo necesita `openpyxl`. Sin pandas, sin numpy.
+
+### Las 3 señales del modelo v4 (tal como estaban)
+
+| Señal | Peso | Definición |
+|---|---|---|
+| **Repetición** | 45% | P(n sale hoy \| n salió ayer), por número |
+| **Ciclo-5** | 25% | boost si n salió exactamente 5 sorteos atrás |
+| **Momentum** | 30% | frecuencia en ventanas de 7/14/30 sorteos vs 0.25 |
+
+Pesos derivados de v2 (35/20/25) renormalizados al eliminar DOW (15%) y
+co-ocurrencia (5%). **Señales ya eliminadas por Jaime y que no deben volver:**
+día de la semana, estacionalidad, "números atrasados"/gap. Fueron
+correctamente identificadas como ruido esotérico.
+
+### Estructura de jugadas (concentración-jackpot)
+1. **NÚCLEO** — el top-10 exacto, 1 jugada
+2. **ROTACIÓN-1** — núcleo con 1 sustitución desde ranks 11–15
+3. **ROTACIÓN-2** — núcleo con 2 sustituciones
+4. **COBERTURA** — 2–3 sustituciones usando ranks 16–20
+
+### Sistema de confianza
+Score 0–100 de tres métricas: precisión reciente del top-20 (50%),
+consistencia de repetición (20%), convergencia de señales (30%).
+Regla dura del sistema: **confianza <40% → no jugar ese día.**
+
+### Formato de salida
+Workbook de 4 pestañas: Jugadas · Scores · Cobertura · Referencia.
+Las jugadas van como números separados por coma, con `---` cada 3 líneas
+(un boleto = 3 jugadas).
+
+---
+
+## 5. AUDITORÍA — POR QUÉ EL MODELO NO PREDICE
+
+Corrida sobre las 5,451 filas cargables de la base actual.
+
+### 5.1 La base tiene 341 filas corruptas
+
+341 filas repiten exactamente un conjunto de 20 números que ya aparecía antes.
+La probabilidad natural de que una combinación 20-de-80 se repita es
+**1 en 3.5 × 10¹⁸**. Son errores de captura, no sorteos.
+
+Su distribución delata el origen:
+
+| Separación entre la fila y su copia | Casos |
+|---|---|
+| 5 filas | **230** |
+| 1 fila | 60 |
+| 2 filas | 32 |
+| otras | 19 |
+
+Concentradas en **2011 (243 casos)**, con 39 en 2012 y 11 en 2026.
+
+### 5.2 El "ciclo-5" era esas filas
+
+Escaneo de lags, lift sobre la base 0.25:
+
+| lag | base cruda | base limpia |
+|---|---|---|
+| 1 | +3.43% | −0.21% |
+| 2 | +2.54% | +0.31% |
+| 3 | +1.06% | +0.06% |
+| 4 | −0.38% | −0.82% |
+| **5** | **+12.79%** | **+0.13%** |
+| 6 | −0.19% | −0.36% |
+| 10 | +13.22% | +0.79% |
+| 15 | +12.15% | — |
+
+Los picos aparecen exactamente en múltiplos de 5 — la firma de un artefacto,
+no de un fenómeno físico. Al quitar las filas duplicadas, el ciclo-5 cae a
+**+0.13%**. El "+3.2% confirmado en 5,453 sorteos" era el eco de un error de
+captura de 2011.
+
+### 5.3 La repetición tampoco existe
+
+Sobre base limpia, promedio de `P(sale | salió ayer) − P(sale | no salió ayer)`
+= **−0.084 puntos porcentuales**. Cero. El sorteo no tiene memoria.
+
+El famoso "#79 se repite 33.7% de las veces" es sesgo de selección: si ordenas
+80 números por su tasa observada y miras el primero, siempre habrá uno arriba.
+
+### 5.4 No hay números calientes
+
+Frecuencia base de los 80 números vs. lo esperado por azar:
+desviación estándar de los z-scores observados = **0.993** (azar puro = 1.000).
+El número más extremo es el 59 con z = −2.54 — exactamente lo que produce
+mirar 80 números al azar. La distribución es indistinguible de la aleatoria.
+
+### 5.5 La métrica que el propio sistema definió
+
+Regla escrita por Jaime en v2: *"Medir hits en top-20 por día. Esperado
+aleatorio = 5. Si promedio > 6 en días de confianza alta = modelo funciona.
+Si promedio ≈ 5 = el modelo no está añadiendo valor."*
+
+Resultado sobre los últimos 300 sorteos:
+
+| | promedio top-20 |
+|---|---|
+| base cruda | 5.037 (IC95 ±0.18) |
+| base limpia | 5.013 (IC95 ±0.18) |
+| azar | 5.000 |
+
+**El modelo puntúa 5.01. El criterio que el propio sistema fijó dice que no
+aporta valor.** Y ese resultado se midió dándole ventaja al modelo (usando
+tasas de repetición calculadas con toda la historia, incluido el futuro).
+
+### 5.6 Lo que sí es cierto
+
+- La base es buena una vez limpia (5,110 sorteos reales, 2010–2026).
+- El código funciona y es rápido.
+- La estructura de concentración es la correcta *si* hubiera señal.
+- El sorteo de Leidsa se comporta como un sorteo justo. Eso es información
+  real: dice que no hay sesgo de máquina explotable.
+
+---
+
+## 6. TAREAS ABIERTAS PARA CLAUDE CODE
+
+**Prioridad alta — integridad de datos**
+1. Limpiar la base de forma permanente (ya se hace en memoria con `dedupe=True`)
+   y regenerar el workbook sin las 341 filas.
+2. Revisar las 3 filas con conteo anómalo: `2010-09-15` (21 números),
+   `2012-10-29` (23), `2015-01-03` (18). Verificar contra la fuente.
+3. Reconstruir 2011 desde resuloto.com — es el año más comprometido.
+4. Cerrar el hueco 2026-03-25 → hoy con `scripts/update_db.py`.
+
+**Prioridad media — verificación**
+5. Correr `--audit` sobre la base reconstruida y confirmar si algo cambia.
+6. Probar el resto del espacio de hipótesis con corrección por comparaciones
+   múltiples: pares/impares, suma del sorteo, distribución por decenas,
+   co-ocurrencia. Si se prueban 200 hipótesis, ~10 darán p<0.05 por puro azar —
+   corregir con Bonferroni o Benjamini-Hochberg antes de creer nada.
+
+**Si Jaime decide seguir jugando**
+7. La parte útil pasa a ser operativa, no predictiva: control de gasto,
+   registro de resultados reales, cálculo del retorno efectivo mes a mes,
+   y la extensión de Chrome para no llenar boletos a mano.
+8. Bajo azar puro, para P(8+ aciertos) lo único que mueve la aguja es el
+   número de jugadas distintas, no cuáles. Vale la pena calcularle
+   explícitamente qué compra cada nivel de gasto.
+
+---
+
+## 7. EXTENSIÓN DE CHROME (v4)
+
+Automatiza el llenado de jugadas en leidsa.com.
+- Construida para Chrome de escritorio.
+- En Android funciona vía **Yandex Browser** o **Quetta Browser** (ambos
+  soportan extensiones de Chrome en modo desarrollador).
+
+### API alternativa (elboletoganador.com)
+```
+api3.bolillerobingoonlinegratis.com/api/sorteos/buscar/historial
+```
+- `fecha` es un **cursor hacia atrás**, no un número de página
+- devuelve 15 resultados por llamada
+- Game IDs: Kino = 8, Pool = 7, Pega3 = 23, Quiniela = 5
+- requiere inyección de content script en una pestaña abierta de
+  elboletoganador.com (las peticiones desde el origen de la extensión están
+  bloqueadas)
+- **firma obligatoria:** `apiFetchViaTab(tabId, gameId, fecha, cb)` —
+  agregar un parámetro `page` rompe el callback
+
+---
+
+## 8. HISTORIAL DE VERSIONES
+
+| Versión | Qué cambió |
+|---|---|
+| v1–v2 | 5 señales: repetición 35%, ciclo-5 20%, momentum 25%, DOW 15%, co-ocurrencia 5%. 80 jugadas a 90% de confianza. |
+| v3 | Se eliminan DOW, estacionalidad y gap/atrasados por falta de fundamento estadístico. |
+| v4 | 3 señales renormalizadas (45/25/30). Formato concentración-jackpot. Escalado por presupuesto. Última corrida: 25 mayo 2026, 32 jugadas, RD$800. |
+| **auditoría** | **Ciclo-5 identificado como artefacto de datos. Repetición y momentum indistinguibles del azar. Backtest = 5.01 vs 5.00 esperado.** |
+
+---
+
+## 9. CÓMO TRABAJAR CON JAIME
+
+- Escribe en español dominicano, directo, sin rodeos.
+- Le gustan los números concretos y las tablas, no las generalidades.
+- **Ya botó tres señales él mismo por no tener base estadística.** Prefiere
+  la verdad incómoda a la validación. Trátalo así.
+- Cuando una cifra sea supuesto tuyo y no dato verificado, dilo.

@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Workbooks generados por --export (la base histórica en data/ SÍ se versiona)
+/*.xlsx
+~$*.xlsx

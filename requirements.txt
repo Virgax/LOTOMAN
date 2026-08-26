@@ -1,0 +1,2 @@
+openpyxl>=3.1
+requests>=2.31   # solo para scripts/update_db.py
