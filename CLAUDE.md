@@ -85,6 +85,8 @@ Eso da forma a toda la estructura de jugadas: en vez de diversificar, se
 
 ```
 athena/
+├── .github/workflows/
+│   └── actualizar-base.yml            <- rutina diaria (trae y commitea sola)
 ├── CLAUDE.md                          <- este archivo
 ├── AUDITORIA.md                       <- el hallazgo, en detalle
 ├── athena.py                          <- motor v4 completo y ejecutable
@@ -105,7 +107,9 @@ Cada fila de datos:
 
 Las primeras 1–2 filas de cada hoja son títulos; el cargador las salta solo.
 
-**Estado de esta copia:** 5,453 filas declaradas, `2010-07-19 → 2026-03-24`.
+**Estado de esta copia:** 5,602 filas crudas / 5,261 únicas,
+`2010-07-19 → 2026-08-25`. El hueco 2026-03-25 → 2026-08-25 lo cerró la
+rutina diaria (+151 sorteos, 0 duplicados nuevos). Ver AUDITORIA.md.
 
 ⚠️ **Existe una versión más nueva** que Jaime bajó en una sesión posterior:
 5,512 sorteos hasta el **24 de mayo de 2026**, más el workbook
@@ -165,7 +169,10 @@ Las jugadas van como números separados por coma, con `---` cada 3 líneas
 
 ## 5. AUDITORÍA — POR QUÉ EL MODELO NO PREDICE
 
-Corrida sobre las 5,451 filas cargables de la base actual.
+Corrida original sobre las 5,451 filas de la base vieja. Re-corrida sobre la
+base completa (5,602 filas) el 2026-08-27: **el hallazgo no cambia**. Ver el
+apartado final de AUDITORIA.md — ahí está el detalle de por qué el `--audit`
+ahora muestra 5.263 en la métrica [5] y por qué eso sigue siendo azar.
 
 ### 5.1 La base tiene 341 filas corruptas
 
@@ -234,8 +241,18 @@ Resultado sobre los últimos 300 sorteos:
 | azar | 5.000 |
 
 **El modelo puntúa 5.01. El criterio que el propio sistema fijó dice que no
-aporta valor.** Y ese resultado se midió dándole ventaja al modelo (usando
-tasas de repetición calculadas con toda la historia, incluido el futuro).
+aporta valor.**
+
+> **Corrección (2026-08-27):** este párrafo decía antes que el backtest le daba
+> ventaja al modelo usando tasas calculadas con el futuro incluido. Es falso en
+> el código actual: `score_numbers(draws, upto=i)` corta con `hist =
+> draws[:upto]`. El backtest es walk-forward limpio, sin lookahead.
+>
+> Sobre la base completa, agrupando 16 ventanas de 300 sorteos sin solape
+> (**4,800 sorteos walk-forward**): promedio **4.979**, IC95 **[4.931, 5.027]**.
+> Contiene 5.000, no llega a 5.3. Una ventana suelta de 300 brinca entre 4.727
+> y 5.177 por puro azar, así que no le hagas caso al número de una sola corrida
+> del `--audit`.
 
 ### 5.6 Lo que sí es cierto
 
@@ -255,10 +272,13 @@ tasas de repetición calculadas con toda la historia, incluido el futuro).
 2. Revisar las 3 filas con conteo anómalo: `2010-09-15` (21 números),
    `2012-10-29` (23), `2015-01-03` (18). Verificar contra la fuente.
 3. Reconstruir 2011 desde resuloto.com — es el año más comprometido.
-4. Cerrar el hueco 2026-03-25 → hoy con `scripts/update_db.py`.
+4. ~~Cerrar el hueco 2026-03-25 → hoy.~~ **HECHO** (2026-08-27, +151 sorteos).
+   Queda un solo día sin explicar: **2026-06-23**. Los otros dos que faltan
+   (2026-04-02 y 04-03) son Jueves y Viernes Santo.
 
 **Prioridad media — verificación**
-5. Correr `--audit` sobre la base reconstruida y confirmar si algo cambia.
+5. ~~Correr `--audit` sobre la base reconstruida.~~ **HECHO.** No cambia nada:
+   4.979 agrupado sobre 4,800 sorteos. Detalle en AUDITORIA.md.
 6. Probar el resto del espacio de hipótesis con corrección por comparaciones
    múltiples: pares/impares, suma del sorteo, distribución por decenas,
    co-ocurrencia. Si se prueban 200 hipótesis, ~10 darán p<0.05 por puro azar —
