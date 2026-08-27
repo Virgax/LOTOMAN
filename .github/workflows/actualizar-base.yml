@@ -1,4 +1,4 @@
-name: Actualizar base Kino
+name: Actualizar bases (Kino + Loto Pool)
 
 # Rutina diaria: trae los sorteos nuevos de resuloto.com y los commitea.
 #
@@ -66,6 +66,18 @@ jobs:
           fi
           python scripts/update_db.py "${args[@]}" 2>&1 | tee update.log
 
+      - name: Traer sorteos nuevos de Loto Pool
+        env:
+          DESDE: ${{ inputs.desde }}
+          HASTA: ${{ steps.rango.outputs.hasta }}
+        run: |
+          set -euo pipefail
+          args=(--hasta "$HASTA" --pausa 1.5)
+          if [[ -n "${DESDE:-}" ]]; then
+            args+=(--desde "$DESDE")
+          fi
+          python scripts/update_pool.py "${args[@]}" 2>&1 | tee update_pool.log
+
       - name: Auditar integridad después de escribir
         run: |
           set -euo pipefail
@@ -75,9 +87,13 @@ jobs:
         run: |
           set -euo pipefail
           {
-            echo '## Movimientos'
+            echo '## Kino'
             echo '```'
             grep -E '^[[:space:]]+[+!-] ' update.log || echo '(ninguno)'
+            echo '```'
+            echo '## Loto Pool'
+            echo '```'
+            grep -E '^[[:space:]]+[+!-] ' update_pool.log || echo '(ninguno)'
             echo '```'
             echo '## Integridad'
             echo '```'
@@ -95,8 +111,9 @@ jobs:
           git config user.email 'github-actions[bot]@users.noreply.github.com'
           git add data/
 
-          nuevos=$(grep -cE '^[[:space:]]+\+ ' update.log || true)
-          git commit -m "datos: +${nuevos} sorteos hasta ${{ steps.rango.outputs.hasta }}"
+          nk=$(grep -cE '^[[:space:]]+\+ ' update.log || true)
+          np=$(grep -cE '^[[:space:]]+\+ ' update_pool.log || true)
+          git commit -m "datos: +${nk} Kino, +${np} Pool hasta ${{ steps.rango.outputs.hasta }}"
 
           # La rama puede haberse movido mientras corría el scrape.
           for intento in 1 2 3; do
