@@ -68,12 +68,26 @@ def base_conocida():
     return out
 
 
-def candidatas(html):
+def candidatas(txt):
+    """Todas las ventanas de 20 números distintos 1..80, SOLAPADAS.
+
+    OJO — aquí estaba el bug de las v3/v5: se usaba re.finditer con un patrón
+    de 20 números, que NO solapa. Si el sorteo real no empezaba justo en el
+    borde de un match, el regex devolvía una ventana corrida un lugar: 19 de
+    los 20 números buenos más un vecino. De ahí salían los "SIN MATCH (mejor
+    solape 19/20)" y las "102 candidatas". No era la fuente: era el parser.
+
+    Deslizar una ventana sobre TODOS los números en orden lo resuelve, y de
+    paso sirve igual si vienen separados por coma o por espacios (conectate
+    los pinta en elementos HTML sueltos, sin comas).
+    """
+    ns = [(m.start(), int(m.group()))
+          for m in re.finditer(r"\d{1,2}", txt) if 1 <= int(m.group()) <= 80]
     out = []
-    for m in SEC20.finditer(html):
-        v = [int(x) for x in re.findall(r"\d{1,2}", m.group(0))]
-        if len(v) == 20 and len(set(v)) == 20 and all(1 <= x <= 80 for x in v):
-            out.append((m.start(), sorted(v)))
+    for i in range(len(ns) - 19):
+        v = [n for _, n in ns[i:i + 20]]
+        if len(set(v)) == 20:
+            out.append((ns[i][0], sorted(v)))
     return out
 
 
@@ -131,7 +145,15 @@ def sondear_conectate(salida, base):
             continue
         t = texto(r.text)
         print(f"  texto plano: {len(t):,} chars")
+        print(f"\n  --- texto plano de {nombre} (primeros 2200 chars) ---")
+        print("  " + t[:2200])
+        print("  --- fin ---\n")
+        print("  [sobre HTML crudo]")
         cands, hits = cotejar(r.text, base, nombre)
+        print("  [sobre texto plano]")
+        cands_t, hits_t = cotejar(t, base, nombre + "/texto")
+        if hits_t and not hits:
+            cands, hits = cands_t, hits_t
         veredicto(f"{nombre}: {len(r.content):,}B texto={len(t):,} "
                   f"secuencias={len(cands)} MATCH_BASE={len(hits)}"
                   + (f" fechas={[str(d) for d, _, _ in hits[:5]]}" if hits else ""))
