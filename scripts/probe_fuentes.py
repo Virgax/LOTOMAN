@@ -2,33 +2,39 @@
 """
 Sonda de fuentes — diagnóstico, no toca la base.
 
-Para qué: desde el contenedor de Claude Code todas las fuentes de lotería están
-bloqueadas por la política de egress. Desde un runner de GitHub Actions sí se
-llega. Esta sonda pide las mismas URLs desde allá y vuelca lo que devuelven,
-para poder escribir el parser con datos reales en la mano en vez de adivinando.
+Desde el contenedor de Claude Code todas las fuentes de lotería están
+bloqueadas por la política de egress. Desde un runner de Actions sí se llega,
+así que la investigación se hace allá.
 
-Objetivo inmediato: 2026-06-23, el único día del tramo 2026-03-25..08-25 que
-quedó sin explicar.
+Lo que ya quedó establecido en las corridas 1 y 2 (2026-08-27):
+  * resuloto.com para 2026-06-23 devuelve HTTP 200 con CERO bytes. Por eso
+    update_db.py lo anotó "sin resultado": el hueco es de resuloto, no de
+    Leidsa. El sorteo se hizo.
+  * leidsa.com devuelve 258 KB con solo 45 chars de texto plano: los números
+    van embebidos en JavaScript.
+  * api3.bolillerobingoonlinegratis.com da 404 en /api, /api/sorteos,
+    /api/sorteos/historial y /api/sorteos/buscar/historial. La ruta que
+    documenta CLAUDE.md §7 ya no existe.
+  * elboletoganador.com es un cascarón SPA de 2.5 KB.
 
-Hallazgos de la corrida 1 (2026-08-27), que definen lo que hace la v2:
-  * resuloto.com para esa fecha devuelve HTTP 200 con CERO bytes. Por eso
-    update_db.py la registró como "sin resultado": el hueco es de resuloto.
-  * leidsa.com/results/Leidsa/KinoTV/3_6247 devuelve 258 KB pero solo 45 chars
-    de texto plano. Los números están embebidos en JavaScript, y quitar los
-    <script> los borra justo a ellos. -> hay que buscar en el CRUDO.
-  * api3.bolillerobingoonlinegratis.com/api/sorteos/buscar/historial da 404 en
-    GET y en POST. La ruta documentada en CLAUDE.md ya no existe.
-  * elboletoganador.com es un cascarón SPA de 2.5 KB sin contenido servido.
+Esta v3 va por tres cosas:
+  1. Confirmar si los números de Kino se sacan del crudo de leidsa.com y si
+     los ids son secuenciales por día.
+  2. Encontrar la URL de Loto Pool en leidsa.com (Jaime lo pidió; el CLAUDE.md
+     lo tenía descartado).
+  3. Descubrir la API REAL de elboletoganador leyendo sus bundles de
+     JavaScript, en vez de adivinar rutas. Jaime dice que ese sitio tiene más
+     historia para Kino y Pool — hay que verificarlo, no asumirlo.
 
 Uso:
-    python scripts/probe_fuentes.py --fecha 2026-06-23 --salida probe/
+    python scripts/probe_fuentes.py --salida probe/
 """
 
 import argparse
 import json
 import re
-import sys
 from pathlib import Path
+from urllib.parse import urljoin
 
 import requests
 
@@ -36,136 +42,130 @@ UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
                     "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"}
 TIMEOUT = 25
 
-# 20 números de 1-2 dígitos separados por coma, tolerando comillas y espacios
-# alrededor (que es como vienen serializados dentro de JS/JSON).
 SEC20 = re.compile(r"""(?:\b0?\d{1,2}\b[\s"']*,[\s"']*){19}\b0?\d{1,2}\b""")
+RESUMEN = []          # (seccion, detalle) -> se imprime al final
 
 
-def texto_plano(html):
-    """Quita scripts/estilos/tags para poder mirar el contenido a ojo."""
-    h = re.sub(r"<(script|style).*?</\1>", " ", html, flags=re.S | re.I)
-    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", h)).strip()
+def anotar(seccion, detalle):
+    RESUMEN.append((seccion, detalle))
+    print(f"  >> {detalle}")
 
 
-def numeros(txt):
-    """Primera ventana de 20 números distintos en 1..80 — la misma heurística
-    que usa update_db.py, para ver si habría funcionado sobre esta respuesta."""
-    ns = [int(x) for x in re.findall(r"\b(\d{1,2})\b", txt) if 1 <= int(x) <= 80]
-    for i in range(len(ns) - 19):
-        v = ns[i:i + 20]
-        if len(set(v)) == 20:
-            return sorted(set(v))
-    return None
-
-
-def cazar_en_crudo(html, etiqueta):
-    """Busca los 20 números DENTRO del HTML crudo, scripts incluidos."""
-    print(f"\n  --- buscando dentro del crudo de {etiqueta} ({len(html):,} chars) ---")
-
-    # Bloques JSON típicos de SPA (Nuxt / Next / <script type=application/json>)
-    blobs = [
-        (r"window\.__NUXT__\s*=\s*(.{0,800})", "__NUXT__"),
-        (r'<script[^>]*id="__NEXT_DATA__"[^>]*>(.{0,800})', "__NEXT_DATA__"),
-        (r'<script[^>]*type="application/json"[^>]*>(.{0,800})', "application/json"),
-    ]
-    for pat, nombre in blobs:
-        for m in re.finditer(pat, html, re.S | re.I):
-            print(f"  [{nombre}] {m.group(1)[:500]}")
-
-    # Inventario de scripts, para saber si el contenido llega por fetch aparte
-    srcs = re.findall(r'<script[^>]*src="([^"]+)"', html, re.I)
-    if srcs:
-        print(f"  scripts externos ({len(srcs)}): {srcs[:8]}")
-
-    cands = []
-    for m in SEC20.finditer(html):
-        v = [int(x) for x in re.findall(r"\d{1,2}", m.group(0))]
-        if len(v) == 20 and len(set(v)) == 20 and all(1 <= x <= 80 for x in v):
-            cands.append((m.start(), sorted(v), m.group(0)[:160]))
-
-    if not cands:
-        print("  (ninguna secuencia de 20 números distintos 1..80 en el crudo)")
-        return None
-
-    print(f"  {len(cands)} candidata(s):")
-    for pos, v, crudo in cands[:6]:
-        ctx = re.sub(r"\s+", " ", html[max(0, pos - 220):pos])
-        print(f"   @{pos}: {v}")
-        print(f"      crudo    : {crudo}")
-        print(f"      contexto : ...{ctx[-220:]}")
-    return cands[0][1]
-
-
-def intento(nombre, salida, **kw):
-    """Hace una petición, la guarda cruda y reporta un resumen."""
-    print(f"\n{'=' * 70}\n### {nombre}\n{kw.get('method', 'GET')} {kw['url']}")
-    if kw.get("json"):
-        print(f"body: {json.dumps(kw['json'])}")
+def pedir(url, salida, nombre, **kw):
     try:
-        r = requests.request(kw.get("method", "GET"), kw["url"], headers=UA,
-                             json=kw.get("json"), params=kw.get("params"),
-                             timeout=TIMEOUT)
+        r = requests.request(kw.pop("method", "GET"), url, headers=UA,
+                             timeout=TIMEOUT, **kw)
     except requests.RequestException as e:
-        print(f"  ERROR de red: {e}")
-        return
-
+        anotar(nombre, f"ERROR de red: {e}")
+        return None
     ct = r.headers.get("content-type", "?")
     print(f"  HTTP {r.status_code}  {ct}  {len(r.content):,} bytes")
+    ext = "json" if "json" in ct else ("js" if "javascript" in ct else "html")
+    (salida / f"{nombre}.{ext}").write_bytes(r.content)
+    return r
 
-    dest = salida / f"{nombre}.{'json' if 'json' in ct else 'html'}"
-    dest.write_bytes(r.content)
-    print(f"  guardado -> {dest}")
 
-    if r.status_code != 200:
-        print(f"  cuerpo (300 chars): {r.text[:300]}")
+def secuencias20(txt):
+    """Todas las secuencias de 20 números distintos 1..80, con su posición."""
+    out = []
+    for m in SEC20.finditer(txt):
+        v = [int(x) for x in re.findall(r"\d{1,2}", m.group(0))]
+        if len(v) == 20 and len(set(v)) == 20 and all(1 <= x <= 80 for x in v):
+            out.append((m.start(), sorted(v)))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# 1 y 2 — LEIDSA OFICIAL
+# ---------------------------------------------------------------------------
+def sondear_leidsa(salida, kino_ids):
+    print(f"\n{'=' * 70}\n## LEIDSA OFICIAL\n{'=' * 70}")
+
+    # Mapa del sitio: qué juegos publica y con qué patrón de URL.
+    print("\n### portada /results")
+    r = pedir("https://www.leidsa.com/results", salida, "leidsa_results")
+    if r is not None and r.status_code == 200:
+        enlaces = sorted(set(re.findall(r'href="(/results/[^"]+)"', r.text)))
+        anotar("leidsa/mapa", f"{len(enlaces)} enlaces /results/: {enlaces[:25]}")
+        pool = [e for e in enlaces if re.search(r"pool", e, re.I)]
+        anotar("leidsa/pool", f"enlaces que mencionan Pool: {pool[:10] or 'NINGUNO'}")
+
+    # Kino: tres ids seguidos. Si los tres dan sorteos distintos, el parser
+    # sirve y los ids son secuenciales por día.
+    for kid in kino_ids:
+        print(f"\n### KinoTV 3_{kid}")
+        r = pedir(f"https://www.leidsa.com/results/Leidsa/KinoTV/3_{kid}",
+                  salida, f"leidsa_kino_{kid}")
+        if r is None or r.status_code != 200:
+            anotar(f"leidsa/kino/{kid}", f"HTTP {r.status_code if r else '-'}")
+            continue
+        titulo = re.search(r"<title>(.{0,80})", r.text, re.S)
+        cands = secuencias20(r.text)
+        anotar(f"leidsa/kino/{kid}",
+               f"titulo={(titulo.group(1).strip() if titulo else '?')!r} "
+               f"candidatas={len(cands)} "
+               f"primera={cands[0][1] if cands else None}")
+        for pos, v in cands[:3]:
+            ctx = re.sub(r"\s+", " ", r.text[max(0, pos - 200):pos])[-200:]
+            print(f"     @{pos} {v}\n        contexto: ...{ctx}")
+
+
+# ---------------------------------------------------------------------------
+# 3 — ELBOLETOGANADOR: encontrar la API real leyendo sus bundles
+# ---------------------------------------------------------------------------
+def sondear_elboleto(salida):
+    print(f"\n{'=' * 70}\n## ELBOLETOGANADOR — descubrir la API real\n{'=' * 70}")
+    base = "https://elboletoganador.com/"
+    r = pedir(base, salida, "ebg_shell")
+    if r is None or r.status_code != 200:
+        anotar("ebg/shell", "no se pudo bajar la portada")
         return
 
-    if "json" in ct:
-        try:
-            print("  JSON (2000 chars):")
-            print("  " + json.dumps(r.json(), ensure_ascii=False)[:2000])
-        except ValueError:
-            print(f"  no parseó como JSON: {r.text[:300]}")
-        return
+    srcs = re.findall(r'<script[^>]*src="([^"]+)"', r.text, re.I)
+    links = re.findall(r'<link[^>]*href="([^"]+\.js)"', r.text, re.I)
+    bundles = sorted(set(srcs + links))
+    anotar("ebg/shell", f"{len(bundles)} bundles JS: {bundles[:12]}")
 
-    txt = texto_plano(r.text)
-    print(f"  texto plano ({len(txt):,} chars): {txt[:600]}")
-    print(f"  heurística sobre texto plano -> {numeros(txt)}")
-    cazar_en_crudo(r.text, nombre)
+    # Patrones que delatan endpoints dentro del JS minificado
+    pat_url = re.compile(r"""https?://[A-Za-z0-9._-]+(?:/[A-Za-z0-9._~%/-]*)?""")
+    pat_ruta = re.compile(r"""["'`](/api/[A-Za-z0-9._~%/-]{2,60})["'`]""")
+
+    hosts, rutas = set(), set()
+    for i, b in enumerate(bundles[:12]):
+        url = urljoin(base, b)
+        print(f"\n### bundle {i}: {url}")
+        rb = pedir(url, salida, f"ebg_bundle_{i}")
+        if rb is None or rb.status_code != 200:
+            continue
+        js = rb.text
+        for m in pat_url.finditer(js):
+            u = m.group(0)
+            if re.search(r"api|sorteo|histor|lot|bolillero", u, re.I):
+                hosts.add(u)
+        for m in pat_ruta.finditer(js):
+            rutas.add(m.group(1))
+
+    anotar("ebg/urls", f"URLs con pinta de API ({len(hosts)}): {sorted(hosts)[:25]}")
+    anotar("ebg/rutas", f"rutas /api/* ({len(rutas)}): {sorted(rutas)[:25]}")
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--fecha", default="2026-06-23")
-    ap.add_argument("--kino-id", type=int, default=6247,
-                    help="id de la página oficial de Leidsa para esa fecha")
     ap.add_argument("--salida", default="probe")
+    ap.add_argument("--kino-ids", default="6247,6248,6244",
+                    help="ids de Leidsa a pedir (23, 24 y 20 de junio 2026)")
     args = ap.parse_args()
 
     salida = Path(args.salida)
     salida.mkdir(parents=True, exist_ok=True)
-    f, kid = args.fecha, args.kino_id
-    print(f"Sonda para {f}  (kino id {kid})\n")
 
-    # 1. Leidsa oficial — la apuesta principal. 258 KB de JS con los números
-    #    adentro. Se piden 3 ids seguidos: si los tres parsean y dan sorteos
-    #    distintos, el parser sirve y los ids son secuenciales por día.
-    for off in (0, 1, -3):
-        intento(f"leidsa_{kid + off}", salida,
-                url=f"https://www.leidsa.com/results/Leidsa/KinoTV/3_{kid + off}")
+    sondear_leidsa(salida, [int(x) for x in args.kino_ids.split(",")])
+    sondear_elboleto(salida)
 
-    # 2. resuloto — para dejar documentado que devuelve 200 con 0 bytes.
-    intento("resuloto", salida,
-            url=f"https://www.resuloto.com/do/leid/super-kino-tv-amp.php?fecha={f}")
-
-    # 3. ¿Existe alguna ruta viva en la API? La documentada da 404.
-    base = "https://api3.bolillerobingoonlinegratis.com"
-    for ruta in ("/api/sorteos/buscar/historial", "/api/sorteos/historial",
-                 "/api/sorteos", "/api"):
-        intento(f"api{ruta.replace('/', '_')}", salida,
-                url=base + ruta, params={"gameId": 8, "fecha": f})
-
-    print(f"\n{'=' * 70}\nListo. Respuestas crudas en {salida}/")
+    print(f"\n{'=' * 70}\n@@ RESUMEN @@\n{'=' * 70}")
+    for seccion, detalle in RESUMEN:
+        print(f"[{seccion}] {detalle}")
+    print(f"{'=' * 70}\nCrudos en {salida}/")
 
 
 if __name__ == "__main__":
