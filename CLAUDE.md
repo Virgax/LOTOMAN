@@ -60,9 +60,11 @@ Esto es estructural y no depende del modelo.
 ### Reglas operativas conocidas
 - Leidsa **no sortea Jueves Santo ni Viernes Santo** (confirmado en varios años).
 - Jaime juega junto a **Irvin**.
-- **Loto Pool fue evaluado y descartado** (márgenes malos, sin mecanismo de
-  recuperación por cero aciertos como el de Kino). No retomar salvo que Jaime
-  lo pida. El archivo `LotoPool_20260325.csv` se deja intacto.
+- **Loto Pool: Jaime lo retomó el 2026-08-27**, ya no está descartado. Ojo: lo
+  que se descartó fue *jugarlo* (márgenes malos, sin recuperación por cero
+  aciertos como la de Kino). Eso sigue en pie. Lo que se hace ahora es
+  **recolectar sus datos**, que es otra cosa. El `LotoPool_20260325.csv` que
+  mencionaba este archivo NO existe en el repo.
 
 ---
 
@@ -91,9 +93,13 @@ athena/
 ├── AUDITORIA.md                       <- el hallazgo, en detalle
 ├── athena.py                          <- motor v4 completo y ejecutable
 ├── scripts/
-│   └── update_db.py                   <- actualizador desde resuloto.com
+│   ├── update_db.py                   <- actualizador de Kino
+│   ├── update_pool.py                 <- actualizador de Loto Pool
+│   └── probe_fuentes.py               <- sonda de fuentes (diagnóstico)
+├── probe/REPORTE.md                   <- último resultado de la sonda
 └── data/
-    ├── kino_2010_a_hoy_COMPLETO.xlsx  <- base histórica
+    ├── kino_2010_a_hoy_COMPLETO.xlsx  <- base histórica de Kino
+    ├── loto_pool.xlsx                 <- base de Loto Pool (desde 2026-07-28)
     └── KinoTV_Tabla_Premios.xlsx      <- tabla de premios
 ```
 
@@ -284,6 +290,18 @@ aporta valor.**
    co-ocurrencia. Si se prueban 200 hipótesis, ~10 darán p<0.05 por puro azar —
    corregir con Bonferroni o Benjamini-Hochberg antes de creer nada.
 
+**Loto Pool — hecho el 2026-08-27**
+9. ~~Encontrar fuente para Pool.~~ **HECHO.** `scripts/update_pool.py` sobre
+   resuloto, enganchado a la rutina diaria. Base arrancada con 28 sorteos.
+10. Verificado con datos, no con el texto de las webs: **Pool es DIARIO**
+    (9 días corridos, y 4 sorteos por cada día de la semana en 28 filas).
+    Es **5 números del 00 al 31**, RD$20 la jugada.
+11. **La regla anti-duplicados de Kino NO se aplica a Pool.** C(32,5)=201,376,
+    así que en 5,600 sorteos se esperan **78 repeticiones legítimas**. Pool
+    deduplica por FECHA, nunca por números.
+12. Pendiente: histórico de Pool hacia atrás de 2026-07-28. Hay que raspar día
+    a día, en tandas. Y los huecos 2026-08-25 y 08-26, que resuloto no sirvió.
+
 **Si Jaime decide seguir jugando**
 7. La parte útil pasa a ser operativa, no predictiva: control de gasto,
    registro de resultados reales, cálculo del retorno efectivo mes a mes,
@@ -301,7 +319,25 @@ Automatiza el llenado de jugadas en leidsa.com.
 - En Android funciona vía **Yandex Browser** o **Quetta Browser** (ambos
   soportan extensiones de Chrome en modo desarrollador).
 
-### API alternativa (elboletoganador.com)
+### ⚠️ Estado real de las fuentes (verificado 2026-08-27)
+
+Se sondearon las cuatro desde un runner de Actions. Solo una sirve:
+
+| Fuente | Veredicto |
+|---|---|
+| **resuloto.com** | ✅ **la única que ha dado datos verificados** — Kino y Pool |
+| leidsa.com | resultados embebidos en JS; extracción acierta 4 de 10 fechas |
+| conectate.com | el HTML servido es artículo SEO, cero resultados; van por JS |
+| elboletoganador.com | cascarón SPA de 2.5 KB; su API da 404; una vez timeout |
+
+Ninguna ofrece descarga masiva de histórico: son 1 día por petición. Cerrar
+el hueco de Kino fueron 155 peticiones.
+
+**La sección de abajo quedó obsoleta.** Las 4 rutas documentadas dan 404, y
+lo del CORS es incorrecto: CORS solo existe en el navegador — desde un
+servidor no aplica, y aun así responde 404. Se deja como registro histórico.
+
+### API alternativa (elboletoganador.com) — OBSOLETA, da 404
 ```
 api3.bolillerobingoonlinegratis.com/api/sorteos/buscar/historial
 ```
