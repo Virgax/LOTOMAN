@@ -32,23 +32,35 @@ con un sorteo que ya está en la base (`MATCH_BASE`). Contar bytes no prueba nad
 [V] cnt_pool_sub: 8 enlaces candidatos a historial
 [V] cnt_leidsa: 64,264B texto=4,050 secuencias=5 MATCH_BASE=0
 [V] cnt_leidsa: 9 enlaces candidatos a historial
-[V] leidsa 3_6242: fecha=2026-06-18 OK rank=654/917
+[V] leidsa 3_6242: fecha=2026-06-18 OK rank=658/918
 [V] leidsa 3_6243: fecha=2026-06-19 SIN MATCH (mejor solape 19/20 de 917)
-[V] leidsa 3_6244: fecha=2026-06-20 SIN MATCH (mejor solape 19/20 de 914)
-[V] leidsa 3_6245: fecha=2026-06-21 SIN MATCH (mejor solape 19/20 de 912)
+[V] leidsa 3_6244: fecha=2026-06-20 SIN MATCH (mejor solape 19/20 de 916)
+[V] leidsa 3_6245: fecha=2026-06-21 SIN MATCH (mejor solape 19/20 de 911)
 [V] leidsa 3_6246: fecha=2026-06-21 SIN MATCH (mejor solape 19/20 de 918)
-[V] leidsa 3_6247: fecha=2026-06-23 NO está en la base (919 candidatas) <- ESTA es la que falta
+[V] leidsa 3_6247: fecha=2026-06-23 NO está en la base (925 candidatas) <- ESTA es la que falta
 [V] leidsa 3_6248: fecha=2026-06-24 OK rank=31/916
-[V] leidsa 3_6249: fecha=2026-06-25 SIN MATCH (mejor solape 19/20 de 915)
+[V] leidsa 3_6249: fecha=2026-06-25 SIN MATCH (mejor solape 19/20 de 914)
 [V] leidsa 3_6250: fecha=2026-06-26 OK rank=572/915
-[V] leidsa 3_6251: fecha=2026-06-27 OK rank=560/913
-[V] leidsa 3_6252: fecha=2026-06-28 SIN MATCH (mejor solape 19/20 de 923)
+[V] leidsa 3_6251: fecha=2026-06-27 OK rank=557/910
+[V] leidsa 3_6252: fecha=2026-06-28 SIN MATCH (mejor solape 19/20 de 924)
 [V] leidsa 3_6253: fecha=2026-06-28 SIN MATCH (mejor solape 19/20 de 911)
-[V] leidsa 3_6254: fecha=2026-06-30 SIN MATCH (mejor solape 19/20 de 915)
-[V] leidsa RANKS de la candidata correcta: [31, 560, 572, 654] (VARIABLE -> hace falta anclar por campo)
+[V] leidsa 3_6254: fecha=2026-06-30 SIN MATCH (mejor solape 19/20 de 912)
+[V] leidsa RANKS de la candidata correcta: [31, 557, 572, 658] (VARIABLE -> hace falta anclar por campo)
 ```
 
 ## Textos planos (para escribir el parser)
+
+### pool_amp_2026-08-22 (1,204 chars)
+
+```
+Loto Pool - Resultado del S&aacute;bado 22 de Agosto de 2026 - resuloto.com Resuloto.com Menú Otros juegos Super Palé Loto Pool Pega 3 Más Super Kino TV Quiniela Leidsa Loto Más Organismos Lotería Nacional RD Leidsa Loto Real Loteka Loto Pool S&aacute;bado 22 de Agosto de 2026 Loto Pool S&aacute;bado 22 Ago 09 15 22 29 31 &#9668;&nbsp;Anterior Siguiente&nbsp;&#9658; Otros juegos Super Palé Loto Pool Pega 3 Más Super Kino TV Quiniela Leidsa Loto Más Organismos Lotería Nacional RD Leidsa Loto Real Loteka Calendario Días de sorteo Últimos resultados Compártenos en redes sociales Aplicacion móvil de Resuloto Bájate nuestra APP ResuLoto y comprueba todos los resultados de las loterías con la cámara de tu móvil . No tendrás que meter los resultados manualmente. Sólo enfoca el código de barras del boleto y te diremos si está premiado Más info Esta página web no está vinculada con, ni afiliada a, ni aprobada por ningún organismo oficial. El propósito de está Web es únicamente informar de los resultados y de noticias relacionadas con los sorteos de loterías. Para obtener más información o comprobar los resultados oficiales contacte con la entidad organizadora de los juegos Aviso Legal Contactar
+```
+
+### pool_plano_2026-08-22 (1,108 chars)
+
+```
+Loto Pool - Resultado del S&aacute;bado 22 de Agosto de 2026 - resuloto.com Resuloto.com Loto Pool S&aacute;bado 22 de Agosto de 2026 Loto Pool S&aacute;bado 22 Ago 09 15 22 29 31 &#9668;&nbsp;Anterior Siguiente&nbsp;&#9658; Otros juegos Super Palé Loto Pool Pega 3 Más Super Kino TV Quiniela Leidsa Loto Más Organismos Lotería Nacional RD Leidsa Loto Real Loteka Calendario Días de sorteo Últimos resultados Compártenos en redes sociales Aplicacion móvil de Resuloto Bájate nuestra APP ResuLoto y comprueba todos los resultados de las loterías con la cámara de tu móvil . No tendrás que meter los resultados manualmente. Sólo enfoca el código de barras del boleto y te diremos si está premiado Más info Favoritos Juegos Buscar Configuración Compartir Esta página web no está vinculada con, ni afiliada a, ni aprobada por ningún organismo oficial. El propósito de está Web es únicamente informar de los resultados y de noticias relacionadas con los sorteos de loterías. Para obtener más información o comprobar los resultados oficiales contacte con la entidad organizadora de los juegos Aviso Legal Contactar
+```
 
 ### cnt_indice (4,050 chars)
 
