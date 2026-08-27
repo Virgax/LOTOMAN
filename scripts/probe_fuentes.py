@@ -43,6 +43,7 @@ DB = Path(__file__).parent.parent / "data" / "kino_2010_a_hoy_COMPLETO.xlsx"
 
 ANCLA_ID, ANCLA_FECHA = 6248, date(2026, 6, 24)   # confirmado por <title> en v3
 VEREDICTO = []
+TEXTOS = {}          # nombre -> texto plano, para volcarlo al reporte
 
 
 def veredicto(linea):
@@ -145,6 +146,7 @@ def sondear_conectate(salida, base):
             continue
         t = texto(r.text)
         print(f"  texto plano: {len(t):,} chars")
+        TEXTOS[nombre] = t
         print(f"\n  --- texto plano de {nombre} (primeros 2200 chars) ---")
         print("  " + t[:2200])
         print("  --- fin ---\n")
@@ -207,6 +209,24 @@ def sondear_leidsa(salida, base, dias):
                      if len(set(ranks)) == 1 else "(VARIABLE -> hace falta anclar por campo)"))
 
 
+def volcado_textos():
+    """Los textos planos de conectate, al reporte.
+
+    Sin ver cómo está maquetada la página no se puede escribir el parser, y
+    leerlos del log del job sale carísimo. Se deduplica por contenido: el
+    dominio www y el subdominio loterias devuelven bytes idénticos.
+    """
+    vistos, partes = {}, ["## Textos planos (para escribir el parser)\n"]
+    for nombre, t in TEXTOS.items():
+        h = hash(t)
+        if h in vistos:
+            partes.append(f"### {nombre}\n\nIdéntico a `{vistos[h]}`.\n")
+            continue
+        vistos[h] = nombre
+        partes.append(f"### {nombre} ({len(t):,} chars)\n\n```\n{t[:3500]}\n```\n")
+    return "\n".join(partes)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--salida", default="probe")
@@ -238,7 +258,8 @@ def main():
         "Criterio: una fuente solo cuenta si alguna de sus secuencias de 20 "
         "números coincide EXACTO\ncon un sorteo que ya está en la base "
         "(`MATCH_BASE`). Contar bytes no prueba nada.\n\n"
-        "```\n" + txt + "\n```\n")
+        "```\n" + txt + "\n```\n\n"
+        + volcado_textos())
     print(f"reporte -> {rep}")
 
 
