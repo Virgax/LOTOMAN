@@ -8,9 +8,17 @@ llega. Esta sonda pide las mismas URLs desde allá y vuelca lo que devuelven,
 para poder escribir el parser con datos reales en la mano en vez de adivinando.
 
 Objetivo inmediato: 2026-06-23, el único día del tramo 2026-03-25..08-25 que
-quedó sin explicar. La búsqueda web dice que Leidsa sí tiene página de
-resultados para ese día (/results/Leidsa/KinoTV/3_6247), así que el sorteo se
-hizo y resuloto.com fue quien falló.
+quedó sin explicar.
+
+Hallazgos de la corrida 1 (2026-08-27), que definen lo que hace la v2:
+  * resuloto.com para esa fecha devuelve HTTP 200 con CERO bytes. Por eso
+    update_db.py la registró como "sin resultado": el hueco es de resuloto.
+  * leidsa.com/results/Leidsa/KinoTV/3_6247 devuelve 258 KB pero solo 45 chars
+    de texto plano. Los números están embebidos en JavaScript, y quitar los
+    <script> los borra justo a ellos. -> hay que buscar en el CRUDO.
+  * api3.bolillerobingoonlinegratis.com/api/sorteos/buscar/historial da 404 en
+    GET y en POST. La ruta documentada en CLAUDE.md ya no existe.
+  * elboletoganador.com es un cascarón SPA de 2.5 KB sin contenido servido.
 
 Uso:
     python scripts/probe_fuentes.py --fecha 2026-06-23 --salida probe/
@@ -27,6 +35,10 @@ import requests
 UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
                     "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"}
 TIMEOUT = 25
+
+# 20 números de 1-2 dígitos separados por coma, tolerando comillas y espacios
+# alrededor (que es como vienen serializados dentro de JS/JSON).
+SEC20 = re.compile(r"""(?:\b0?\d{1,2}\b[\s"']*,[\s"']*){19}\b0?\d{1,2}\b""")
 
 
 def texto_plano(html):
@@ -46,9 +58,47 @@ def numeros(txt):
     return None
 
 
+def cazar_en_crudo(html, etiqueta):
+    """Busca los 20 números DENTRO del HTML crudo, scripts incluidos."""
+    print(f"\n  --- buscando dentro del crudo de {etiqueta} ({len(html):,} chars) ---")
+
+    # Bloques JSON típicos de SPA (Nuxt / Next / <script type=application/json>)
+    blobs = [
+        (r"window\.__NUXT__\s*=\s*(.{0,800})", "__NUXT__"),
+        (r'<script[^>]*id="__NEXT_DATA__"[^>]*>(.{0,800})', "__NEXT_DATA__"),
+        (r'<script[^>]*type="application/json"[^>]*>(.{0,800})', "application/json"),
+    ]
+    for pat, nombre in blobs:
+        for m in re.finditer(pat, html, re.S | re.I):
+            print(f"  [{nombre}] {m.group(1)[:500]}")
+
+    # Inventario de scripts, para saber si el contenido llega por fetch aparte
+    srcs = re.findall(r'<script[^>]*src="([^"]+)"', html, re.I)
+    if srcs:
+        print(f"  scripts externos ({len(srcs)}): {srcs[:8]}")
+
+    cands = []
+    for m in SEC20.finditer(html):
+        v = [int(x) for x in re.findall(r"\d{1,2}", m.group(0))]
+        if len(v) == 20 and len(set(v)) == 20 and all(1 <= x <= 80 for x in v):
+            cands.append((m.start(), sorted(v), m.group(0)[:160]))
+
+    if not cands:
+        print("  (ninguna secuencia de 20 números distintos 1..80 en el crudo)")
+        return None
+
+    print(f"  {len(cands)} candidata(s):")
+    for pos, v, crudo in cands[:6]:
+        ctx = re.sub(r"\s+", " ", html[max(0, pos - 220):pos])
+        print(f"   @{pos}: {v}")
+        print(f"      crudo    : {crudo}")
+        print(f"      contexto : ...{ctx[-220:]}")
+    return cands[0][1]
+
+
 def intento(nombre, salida, **kw):
     """Hace una petición, la guarda cruda y reporta un resumen."""
-    print(f"\n{'=' * 70}\n### {nombre}\n{kw.get('method','GET')} {kw['url']}")
+    print(f"\n{'=' * 70}\n### {nombre}\n{kw.get('method', 'GET')} {kw['url']}")
     if kw.get("json"):
         print(f"body: {json.dumps(kw['json'])}")
     try:
@@ -62,13 +112,12 @@ def intento(nombre, salida, **kw):
     ct = r.headers.get("content-type", "?")
     print(f"  HTTP {r.status_code}  {ct}  {len(r.content):,} bytes")
 
-    ext = "json" if "json" in ct else "html"
-    dest = salida / f"{nombre}.{ext}"
+    dest = salida / f"{nombre}.{'json' if 'json' in ct else 'html'}"
     dest.write_bytes(r.content)
     print(f"  guardado -> {dest}")
 
     if r.status_code != 200:
-        print(f"  cuerpo (500 chars): {r.text[:500]}")
+        print(f"  cuerpo (300 chars): {r.text[:300]}")
         return
 
     if "json" in ct:
@@ -76,13 +125,13 @@ def intento(nombre, salida, **kw):
             print("  JSON (2000 chars):")
             print("  " + json.dumps(r.json(), ensure_ascii=False)[:2000])
         except ValueError:
-            print(f"  no parseó como JSON: {r.text[:500]}")
-    else:
-        txt = texto_plano(r.text)
-        print(f"  texto plano ({len(txt):,} chars), primeros 1500:")
-        print("  " + txt[:1500])
-        n = numeros(txt)
-        print(f"\n  heurística de 20 números -> {n}")
+            print(f"  no parseó como JSON: {r.text[:300]}")
+        return
+
+    txt = texto_plano(r.text)
+    print(f"  texto plano ({len(txt):,} chars): {txt[:600]}")
+    print(f"  heurística sobre texto plano -> {numeros(txt)}")
+    cazar_en_crudo(r.text, nombre)
 
 
 def main():
@@ -95,28 +144,26 @@ def main():
 
     salida = Path(args.salida)
     salida.mkdir(parents=True, exist_ok=True)
-    f = args.fecha
-    print(f"Sonda para {f}\n")
+    f, kid = args.fecha, args.kino_id
+    print(f"Sonda para {f}  (kino id {kid})\n")
 
-    # 1. resuloto — la fuente que usa update_db.py hoy. ¿Por qué falló?
+    # 1. Leidsa oficial — la apuesta principal. 258 KB de JS con los números
+    #    adentro. Se piden 3 ids seguidos: si los tres parsean y dan sorteos
+    #    distintos, el parser sirve y los ids son secuenciales por día.
+    for off in (0, 1, -3):
+        intento(f"leidsa_{kid + off}", salida,
+                url=f"https://www.leidsa.com/results/Leidsa/KinoTV/3_{kid + off}")
+
+    # 2. resuloto — para dejar documentado que devuelve 200 con 0 bytes.
     intento("resuloto", salida,
             url=f"https://www.resuloto.com/do/leid/super-kino-tv-amp.php?fecha={f}")
 
-    # 2. Leidsa oficial — la búsqueda dice que esta página existe para el 23/6.
-    intento("leidsa_oficial", salida,
-            url=f"https://www.leidsa.com/results/Leidsa/KinoTV/3_{args.kino_id}")
-
-    # 3-5. elboletoganador / API. CLAUDE.md documenta el endpoint y que `fecha`
-    # es un cursor hacia atrás, pero no la forma exacta de la petición. El
-    # bloqueo por CORS que menciona es cosa del navegador; desde el servidor no
-    # aplica. Probamos varias formas para ver cuál responde.
-    api = "https://api3.bolillerobingoonlinegratis.com/api/sorteos/buscar/historial"
-    intento("api_get", salida, url=api, params={"gameId": 8, "fecha": f})
-    intento("api_post_gameId", salida, method="POST", url=api,
-            json={"gameId": 8, "fecha": f})
-    intento("api_post_juego", salida, method="POST", url=api,
-            json={"juego": 8, "fecha": f})
-    intento("elboletoganador", salida, url="https://elboletoganador.com/")
+    # 3. ¿Existe alguna ruta viva en la API? La documentada da 404.
+    base = "https://api3.bolillerobingoonlinegratis.com"
+    for ruta in ("/api/sorteos/buscar/historial", "/api/sorteos/historial",
+                 "/api/sorteos", "/api"):
+        intento(f"api{ruta.replace('/', '_')}", salida,
+                url=base + ruta, params={"gameId": 8, "fecha": f})
 
     print(f"\n{'=' * 70}\nListo. Respuestas crudas en {salida}/")
 
