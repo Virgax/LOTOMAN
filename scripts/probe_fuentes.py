@@ -3,169 +3,158 @@
 Sonda de fuentes — diagnóstico, no toca la base.
 
 Desde el contenedor de Claude Code todas las fuentes de lotería están
-bloqueadas por la política de egress. Desde un runner de Actions sí se llega,
-así que la investigación se hace allá.
+bloqueadas por egress. Desde un runner de Actions sí se llega.
 
-Lo que ya quedó establecido en las corridas 1 y 2 (2026-08-27):
-  * resuloto.com para 2026-06-23 devuelve HTTP 200 con CERO bytes. Por eso
-    update_db.py lo anotó "sin resultado": el hueco es de resuloto, no de
-    Leidsa. El sorteo se hizo.
-  * leidsa.com devuelve 258 KB con solo 45 chars de texto plano: los números
-    van embebidos en JavaScript.
-  * api3.bolillerobingoonlinegratis.com da 404 en /api, /api/sorteos,
-    /api/sorteos/historial y /api/sorteos/buscar/historial. La ruta que
-    documenta CLAUDE.md §7 ya no existe.
-  * elboletoganador.com es un cascarón SPA de 2.5 KB.
+Historia de lo aprendido (2026-08-27):
 
-Esta v3 va por tres cosas:
-  1. Confirmar si los números de Kino se sacan del crudo de leidsa.com y si
-     los ids son secuenciales por día.
-  2. Encontrar la URL de Loto Pool en leidsa.com (Jaime lo pidió; el CLAUDE.md
-     lo tenía descartado).
-  3. Descubrir la API REAL de elboletoganador leyendo sus bundles de
-     JavaScript, en vez de adivinar rutas. Jaime dice que ese sitio tiene más
-     historia para Kino y Pool — hay que verificarlo, no asumirlo.
+  v1  resuloto.com para 2026-06-23 devuelve HTTP 200 con CERO bytes -> el
+      hueco es de resuloto, no de Leidsa. El sorteo se hizo.
+      La API de CLAUDE.md §7 da 404 en las 4 rutas probadas.
+      elboletoganador.com es un cascarón SPA de 2.5 KB.
+  v2  leidsa.com trae los números embebidos en JavaScript.
+  v3  Contrastado contra la base: la página 3_6248 (24/6) parseó EXACTA, pero
+      la 3_6244 (20/6) dio un solape de 5/20 — puro azar. Cada página tiene
+      ~102 secuencias de 20 números distintos, así que "la primera" es una
+      moneda al aire. La heurística de update_db.py NO SIRVE aquí.
+
+Esta v4 no adivina: usa la base como verdad de campo. Para cada página cuya
+fecha YA está en la base, busca cuál de las ~102 candidatas es la correcta y
+reporta su posición y su contexto. Si todas caen en el mismo campo, ese es el
+parser que hay que escribir.
 
 Uso:
     python scripts/probe_fuentes.py --salida probe/
 """
 
 import argparse
-import json
 import re
+from datetime import date, timedelta
 from pathlib import Path
-from urllib.parse import urljoin
 
 import requests
+from openpyxl import load_workbook
 
 UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
                     "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"}
-TIMEOUT = 25
-
 SEC20 = re.compile(r"""(?:\b0?\d{1,2}\b[\s"']*,[\s"']*){19}\b0?\d{1,2}\b""")
-RESUMEN = []          # (seccion, detalle) -> se imprime al final
+DB = Path(__file__).parent.parent / "data" / "kino_2010_a_hoy_COMPLETO.xlsx"
+
+# Ancla confirmada por título en la corrida v3: id 6248 = 2026-06-24.
+ANCLA_ID, ANCLA_FECHA = 6248, date(2026, 6, 24)
+RESUMEN = []
 
 
-def anotar(seccion, detalle):
-    RESUMEN.append((seccion, detalle))
-    print(f"  >> {detalle}")
+def anotar(s, d):
+    RESUMEN.append((s, d))
+    print(f"  >> {d}")
 
 
-def pedir(url, salida, nombre, **kw):
-    try:
-        r = requests.request(kw.pop("method", "GET"), url, headers=UA,
-                             timeout=TIMEOUT, **kw)
-    except requests.RequestException as e:
-        anotar(nombre, f"ERROR de red: {e}")
-        return None
-    ct = r.headers.get("content-type", "?")
-    print(f"  HTTP {r.status_code}  {ct}  {len(r.content):,} bytes")
-    ext = "json" if "json" in ct else ("js" if "javascript" in ct else "html")
-    (salida / f"{nombre}.{ext}").write_bytes(r.content)
-    return r
+def base_conocida():
+    """{date: [20 números]} de lo que ya está guardado."""
+    wb = load_workbook(DB, read_only=True, data_only=True)
+    out = {}
+    for hoja in wb.sheetnames:
+        if not hoja.strip().isdigit():
+            continue
+        for a, b in wb[hoja].iter_rows(min_col=1, max_col=2, values_only=True):
+            if not a or not b or not isinstance(b, str):
+                continue
+            try:
+                d = date.fromisoformat(str(a).strip()[:10])
+            except ValueError:
+                continue
+            out[d] = sorted(int(x) for x in b.replace(" ", "").split(",") if x)
+    wb.close()
+    return out
 
 
-def secuencias20(txt):
-    """Todas las secuencias de 20 números distintos 1..80, con su posición."""
+def candidatas(html):
+    """[(posicion, [20 numeros])] — todas, en orden de aparición."""
     out = []
-    for m in SEC20.finditer(txt):
+    for m in SEC20.finditer(html):
         v = [int(x) for x in re.findall(r"\d{1,2}", m.group(0))]
         if len(v) == 20 and len(set(v)) == 20 and all(1 <= x <= 80 for x in v):
             out.append((m.start(), sorted(v)))
     return out
 
 
-# ---------------------------------------------------------------------------
-# 1 y 2 — LEIDSA OFICIAL
-# ---------------------------------------------------------------------------
-def sondear_leidsa(salida, kino_ids):
-    print(f"\n{'=' * 70}\n## LEIDSA OFICIAL\n{'=' * 70}")
-
-    # Mapa del sitio: qué juegos publica y con qué patrón de URL.
-    print("\n### portada /results")
-    r = pedir("https://www.leidsa.com/results", salida, "leidsa_results")
-    if r is not None and r.status_code == 200:
-        enlaces = sorted(set(re.findall(r'href="(/results/[^"]+)"', r.text)))
-        anotar("leidsa/mapa", f"{len(enlaces)} enlaces /results/: {enlaces[:25]}")
-        pool = [e for e in enlaces if re.search(r"pool", e, re.I)]
-        anotar("leidsa/pool", f"enlaces que mencionan Pool: {pool[:10] or 'NINGUNO'}")
-
-    # Kino: tres ids seguidos. Si los tres dan sorteos distintos, el parser
-    # sirve y los ids son secuenciales por día.
-    for kid in kino_ids:
-        print(f"\n### KinoTV 3_{kid}")
-        r = pedir(f"https://www.leidsa.com/results/Leidsa/KinoTV/3_{kid}",
-                  salida, f"leidsa_kino_{kid}")
-        if r is None or r.status_code != 200:
-            anotar(f"leidsa/kino/{kid}", f"HTTP {r.status_code if r else '-'}")
-            continue
-        titulo = re.search(r"<title>(.{0,80})", r.text, re.S)
-        cands = secuencias20(r.text)
-        anotar(f"leidsa/kino/{kid}",
-               f"titulo={(titulo.group(1).strip() if titulo else '?')!r} "
-               f"candidatas={len(cands)} "
-               f"primera={cands[0][1] if cands else None}")
-        for pos, v in cands[:3]:
-            ctx = re.sub(r"\s+", " ", r.text[max(0, pos - 200):pos])[-200:]
-            print(f"     @{pos} {v}\n        contexto: ...{ctx}")
-
-
-# ---------------------------------------------------------------------------
-# 3 — ELBOLETOGANADOR: encontrar la API real leyendo sus bundles
-# ---------------------------------------------------------------------------
-def sondear_elboleto(salida):
-    print(f"\n{'=' * 70}\n## ELBOLETOGANADOR — descubrir la API real\n{'=' * 70}")
-    base = "https://elboletoganador.com/"
-    r = pedir(base, salida, "ebg_shell")
-    if r is None or r.status_code != 200:
-        anotar("ebg/shell", "no se pudo bajar la portada")
-        return
-
-    srcs = re.findall(r'<script[^>]*src="([^"]+)"', r.text, re.I)
-    links = re.findall(r'<link[^>]*href="([^"]+\.js)"', r.text, re.I)
-    bundles = sorted(set(srcs + links))
-    anotar("ebg/shell", f"{len(bundles)} bundles JS: {bundles[:12]}")
-
-    # Patrones que delatan endpoints dentro del JS minificado
-    pat_url = re.compile(r"""https?://[A-Za-z0-9._-]+(?:/[A-Za-z0-9._~%/-]*)?""")
-    pat_ruta = re.compile(r"""["'`](/api/[A-Za-z0-9._~%/-]{2,60})["'`]""")
-
-    hosts, rutas = set(), set()
-    for i, b in enumerate(bundles[:12]):
-        url = urljoin(base, b)
-        print(f"\n### bundle {i}: {url}")
-        rb = pedir(url, salida, f"ebg_bundle_{i}")
-        if rb is None or rb.status_code != 200:
-            continue
-        js = rb.text
-        for m in pat_url.finditer(js):
-            u = m.group(0)
-            if re.search(r"api|sorteo|histor|lot|bolillero", u, re.I):
-                hosts.add(u)
-        for m in pat_ruta.finditer(js):
-            rutas.add(m.group(1))
-
-    anotar("ebg/urls", f"URLs con pinta de API ({len(hosts)}): {sorted(hosts)[:25]}")
-    anotar("ebg/rutas", f"rutas /api/* ({len(rutas)}): {sorted(rutas)[:25]}")
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--salida", default="probe")
-    ap.add_argument("--kino-ids", default="6247,6248,6244",
-                    help="ids de Leidsa a pedir (23, 24 y 20 de junio 2026)")
+    ap.add_argument("--dias", type=int, default=6,
+                    help="cuántos días alrededor del ancla pedir")
     args = ap.parse_args()
 
     salida = Path(args.salida)
     salida.mkdir(parents=True, exist_ok=True)
+    base = base_conocida()
+    anotar("base", f"{len(base):,} sorteos conocidos, último {max(base)}")
 
-    sondear_leidsa(salida, [int(x) for x in args.kino_ids.split(",")])
-    sondear_elboleto(salida)
+    print(f"\n{'=' * 70}\n## LEIDSA — hallar el campo correcto usando la base\n{'=' * 70}")
+    aciertos = []
+    for off in range(-args.dias, args.dias + 1):
+        kid = ANCLA_ID + off
+        esperada = ANCLA_FECHA + timedelta(days=off)
+        url = f"https://www.leidsa.com/results/Leidsa/KinoTV/3_{kid}"
+        print(f"\n### 3_{kid}  (se espera {esperada})")
+        try:
+            r = requests.get(url, headers=UA, timeout=30)
+        except requests.RequestException as e:
+            anotar(f"leidsa/{kid}", f"ERROR de red: {e}")
+            continue
+        if r.status_code != 200:
+            anotar(f"leidsa/{kid}", f"HTTP {r.status_code}")
+            continue
+        (salida / f"leidsa_{kid}.html").write_bytes(r.content)
+
+        # La fecha REAL la dice el título, no mi suposición.
+        mt = re.search(r"<title>\s*Leidsa KinoTV Resultados \|\s*(\d+)/(\d+)/(\d+)",
+                       r.text)
+        if not mt:
+            anotar(f"leidsa/{kid}", "sin título parseable")
+            continue
+        dd, mm, yy = (int(x) for x in mt.groups())
+        real = date(yy, mm, dd)
+
+        cands = candidatas(r.text)
+        conocido = base.get(real)
+        if not conocido:
+            anotar(f"leidsa/{kid}",
+                   f"fecha={real} (esperada {esperada}) NO está en la base — "
+                   f"{len(cands)} candidatas, es la que hay que recuperar")
+            continue
+
+        # ¿Cuál de las candidatas es la buena?
+        hit = [(i, pos) for i, (pos, v) in enumerate(cands) if v == conocido]
+        if not hit:
+            mejor = max((len(set(v) & set(conocido)), i)
+                        for i, (_, v) in enumerate(cands)) if cands else (0, -1)
+            anotar(f"leidsa/{kid}",
+                   f"fecha={real} coincide_exacta=NINGUNA de {len(cands)} "
+                   f"(mejor solape {mejor[0]}/20) -> el dato NO está en la página")
+            continue
+
+        i, pos = hit[0]
+        ctx = re.sub(r"\s+", " ", r.text[max(0, pos - 260):pos])[-260:]
+        aciertos.append((real, i, len(cands), ctx))
+        anotar(f"leidsa/{kid}",
+               f"fecha={real} ok=SI rank={i}/{len(cands)} @{pos}")
+        print(f"     contexto: ...{ctx}")
 
     print(f"\n{'=' * 70}\n@@ RESUMEN @@\n{'=' * 70}")
-    for seccion, detalle in RESUMEN:
-        print(f"[{seccion}] {detalle}")
-    print(f"{'=' * 70}\nCrudos en {salida}/")
+    for s, d in RESUMEN:
+        print(f"[{s}] {d}")
+    if aciertos:
+        ranks = sorted({i for _, i, _, _ in aciertos})
+        print(f"\n[VEREDICTO] {len(aciertos)} páginas verificadas contra la base.")
+        print(f"[VEREDICTO] ranks de la candidata correcta: {ranks}")
+        print("[VEREDICTO] rank constante => el parser es posicional y sirve.")
+        print("[VEREDICTO] contextos:")
+        for real, i, n, ctx in aciertos:
+            print(f"   {real} rank {i}/{n}: ...{ctx[-160:]}")
+    else:
+        print("\n[VEREDICTO] ninguna página se pudo verificar contra la base.")
+    print("=" * 70)
 
 
 if __name__ == "__main__":

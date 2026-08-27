@@ -7,10 +7,10 @@ name: Sonda de fuentes
 on:
   workflow_dispatch:
     inputs:
-      kino_ids:
-        description: 'IDs de Leidsa KinoTV a pedir, separados por coma'
+      dias:
+        description: 'Días alrededor del ancla (id 6248 = 2026-06-24) a pedir'
         required: false
-        default: '6247,6248,6244'
+        default: '6'
         type: string
 
 permissions:
@@ -29,18 +29,18 @@ jobs:
         with:
           python-version: '3.12'
 
-      - run: pip install requests
+      - run: pip install -r requirements.txt
 
       - name: Sondear
         env:
-          KINO_IDS: ${{ inputs.kino_ids }}
+          DIAS: ${{ inputs.dias }}
         run: |
           set -euo pipefail
-          KINO_IDS="${KINO_IDS:-6247,6248,6244}"
-          [[ "$KINO_IDS" =~ ^[0-9]+(,[0-9]+)*$ ]] \
-            || { echo "::error::kino_ids inválido: $KINO_IDS"; exit 1; }
-          python scripts/probe_fuentes.py \
-            --kino-ids "$KINO_IDS" --salida probe 2>&1 | tee probe.log
+          DIAS="${DIAS:-6}"
+          [[ "$DIAS" =~ ^[0-9]{1,2}$ ]] \
+            || { echo "::error::dias inválido: $DIAS"; exit 1; }
+          python scripts/probe_fuentes.py --dias "$DIAS" --salida probe \
+            2>&1 | tee probe.log
 
       - name: Publicar en el resumen del job
         if: always()
