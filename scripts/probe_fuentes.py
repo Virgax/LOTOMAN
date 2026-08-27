@@ -103,6 +103,8 @@ def bajar(url, salida, nombre, timeout=30):
     except requests.RequestException as e:
         print(f"  ERROR de red: {type(e).__name__}")
         return None
+    if not r.encoding or r.encoding.lower() in ("iso-8859-1", "latin-1"):
+        r.encoding = r.apparent_encoding or "utf-8"   # si no, sale "EstadÃ­sticas"
     print(f"  HTTP {r.status_code}  {len(r.content):,} bytes")
     (salida / f"{nombre}.html").write_bytes(r.content)
     return r
@@ -128,6 +130,62 @@ def cotejar(html, base, etiqueta):
 
 
 # ---------------------------------------------------------------------------
+def sondear_pool_resuloto(salida):
+    """Loto Pool en resuloto — la única fuente que ha dado datos verificados.
+
+    Los 151 sorteos de Kino que entraron a la base salieron de aquí y pasaron
+    todas las pruebas: 0 duplicados, todos con 20 números, y el del 24/6
+    coincide exacto con lo que publica leidsa.com. Si tiene Kino, lo lógico es
+    que tenga Pool con el mismo patrón de URL.
+
+    Especificación de Loto Pool según leidsa vía conectate: 5 números del 00
+    al 31. OJO: conectate se contradice sobre los días — su índice lo lista
+    como diario y su página de Pool dice miércoles y sábados. Por eso se piden
+    9 días corridos: qué días traen sorteo lo decide el dato, no el texto.
+    """
+    print(f"\n{'=' * 70}\n## LOTO POOL en resuloto\n{'=' * 70}")
+    patrones = [
+        "https://www.resuloto.com/do/leid/loto-pool-amp.php?fecha={}",
+        "https://www.resuloto.com/do/leid/loto-pool.php?fecha={}",
+        "https://www.resuloto.com/do/leid/pool-amp.php?fecha={}",
+    ]
+    # Una fecha de control donde SÍ hubo sorteo de Kino, para separar
+    # "la URL no existe" de "ese día no hubo sorteo".
+    ctrl = date(2026, 8, 22)
+    vivo = None
+    for pat in patrones:
+        url = pat.format(ctrl.isoformat())
+        print(f"\n### {url}")
+        r = bajar(url, salida, "pool_" + re.sub(r"\W+", "_", pat)[:40])
+        if r is None:
+            continue
+        t = texto(r.text)
+        veredicto(f"pool patrón {pat.split('/')[-1].split('?')[0]}: "
+                  f"HTTP {r.status_code} {len(r.content):,}B texto={len(t):,}")
+        if r.status_code == 200 and len(t) > 0:
+            vivo = pat
+            print(f"  texto: {t[:600]}")
+
+    if not vivo:
+        veredicto("pool: NINGÚN patrón de resuloto respondió con contenido")
+        return
+
+    veredicto(f"pool: patrón vivo -> {vivo}")
+    # Nueve días corridos: así se ve solo qué días hay sorteo.
+    print(f"\n### barrido de 9 días con {vivo}")
+    dias = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+    for i in range(9):
+        d = date(2026, 8, 17) + timedelta(days=i)
+        r = bajar(vivo.format(d.isoformat()), salida, f"pool_{d}", timeout=20)
+        if r is None or r.status_code != 200:
+            continue
+        t = texto(r.text)
+        ns = [int(x) for x in re.findall(r"\b\d{1,2}\b", t)]
+        en_rango = [n for n in ns if 0 <= n <= 31]
+        veredicto(f"pool {d} {dias[d.weekday()]}: texto={len(t):,} "
+                  f"numeros={len(ns)} en_rango_00_31={en_rango[:12]}")
+
+
 def sondear_conectate(salida, base):
     print(f"\n{'=' * 70}\n## CONECTATE.COM\n{'=' * 70}")
     urls = [
@@ -239,6 +297,7 @@ def main():
     base = base_conocida()
     veredicto(f"base: {len(base):,} sorteos conocidos, último {max(base)}")
 
+    sondear_pool_resuloto(salida)
     sondear_conectate(salida, base)
     if not args.saltar_leidsa:
         sondear_leidsa(salida, base, args.dias)
