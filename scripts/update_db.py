@@ -155,6 +155,18 @@ def main():
     if faltantes:
         print("  Días sin dato: " + ", ".join(str(x) for x in faltantes))
         print("  NO los rellenes a mano copiando otro día.")
+    # Guardia anti-fallo-silencioso. Si se pidieron varios días y NINGUNO trajo
+    # resultado, lo más probable es que resuloto.com cambió de formato o está
+    # caída — no que Leidsa dejara de sortear una semana entera. Abortamos con
+    # error para que la rutina diaria se ponga roja en vez de reportar
+    # "sin resultado" en silencio para siempre.
+    if not nuevos and len(faltantes) > 3:
+        print(f"\n! ABORTADO: {len(faltantes)} días pedidos, ninguno trajo resultado.",
+              file=sys.stderr)
+        print("  Eso no es un feriado. Revisa si la fuente cambió de formato.",
+              file=sys.stderr)
+        sys.exit(2)
+
     if args.dry_run:
         print("(dry-run: no se escribió nada)")
         return

@@ -1,0 +1,109 @@
+name: Actualizar base Kino
+
+# Rutina diaria: trae los sorteos nuevos de resuloto.com y los commitea.
+#
+# La PRIMERA corrida cierra sola el hueco acumulado: update_db.py arranca en
+# el día siguiente al último sorteo que ya está en la base, así que si la base
+# va hasta 2026-03-24, la primera corrida trae 2026-03-25 -> ayer de un tirón.
+#
+# El cron de GitHub Actions solo dispara en la rama por defecto del repo.
+
+on:
+  schedule:
+    # 10:15 UTC = 6:15 AM en Santo Domingo (UTC-4).
+    # El sorteo es 8:55 PM RD, así que a esa hora ya está publicado.
+    - cron: '15 10 * * *'
+  workflow_dispatch:
+    inputs:
+      desde:
+        description: 'Fecha inicial YYYY-MM-DD (vacío = día siguiente al último sorteo en la base)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+# Nunca dos corridas escribiendo el workbook a la vez.
+concurrency:
+  group: actualizar-base
+  cancel-in-progress: false
+
+jobs:
+  actualizar:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Calcular hasta qué día pedir
+        id: rango
+        run: |
+          set -euo pipefail
+          # "ayer" en hora dominicana: el sorteo de anoche ya está publicado,
+          # el de hoy todavía no existe. Pedirlo solo ensucia el log.
+          echo "hasta=$(TZ=America/Santo_Domingo date -d yesterday +%F)" >> "$GITHUB_OUTPUT"
+
+      - name: Traer sorteos nuevos
+        env:
+          DESDE: ${{ inputs.desde }}
+          HASTA: ${{ steps.rango.outputs.hasta }}
+        run: |
+          set -euo pipefail
+          args=(--hasta "$HASTA" --pausa 1.5)
+          if [[ -n "${DESDE:-}" ]]; then
+            [[ "$DESDE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] \
+              || { echo "::error::--desde inválido: $DESDE"; exit 1; }
+            args+=(--desde "$DESDE")
+          fi
+          python scripts/update_db.py "${args[@]}" 2>&1 | tee update.log
+
+      - name: Auditar integridad después de escribir
+        run: |
+          set -euo pipefail
+          python athena.py --audit 2>&1 | tee audit.log
+
+      - name: Commitear si hubo sorteos nuevos
+        run: |
+          set -euo pipefail
+          {
+            echo '## Movimientos'
+            echo '```'
+            grep -E '^[[:space:]]+[+!-] ' update.log || echo '(ninguno)'
+            echo '```'
+            echo '## Integridad'
+            echo '```'
+            sed -n '/\[1\] INTEGRIDAD/,/^$/p' audit.log
+            sed -n '/\[5\] LA MÉTRICA/,/^$/p' audit.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if git diff --quiet -- data/; then
+            echo "Sin sorteos nuevos, no hay nada que commitear."
+            exit 0
+          fi
+
+          git config user.name  'athena-bot'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add data/
+
+          nuevos=$(grep -cE '^[[:space:]]+\+ ' update.log || true)
+          git commit -m "datos: +${nuevos} sorteos hasta ${{ steps.rango.outputs.hasta }}"
+
+          # La rama puede haberse movido mientras corría el scrape.
+          for intento in 1 2 3; do
+            git push && exit 0
+            echo "push falló (intento $intento), reintentando…"
+            git pull --rebase origin "${GITHUB_REF_NAME}"
+            sleep $((intento * 4))
+          done
+          echo "::error::no se pudo hacer push tras 3 intentos"
+          exit 1
