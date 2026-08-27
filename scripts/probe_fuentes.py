@@ -170,6 +170,14 @@ def sondear_pool_resuloto(salida):
         veredicto("pool: NINGÚN patrón de resuloto respondió con contenido")
         return
 
+    # Volcar la maqueta: son ~1,200 chars. Anclar el parser en "salta 3 y coge
+    # 5" es justo la clase de heurística frágil que ya falló antes.
+    for etq, pat in (("amp", patrones[0]), ("plano", patrones[1])):
+        r = bajar(pat.format(ctrl.isoformat()), salida, f"pool_maqueta_{etq}")
+        if r is None or r.status_code != 200:
+            continue
+        TEXTOS[f"pool_{etq}_{ctrl}"] = texto(r.text)
+
     veredicto(f"pool: patrón vivo -> {vivo}")
     # Nueve días corridos: así se ve solo qué días hay sorteo.
     print(f"\n### barrido de 9 días con {vivo}")
