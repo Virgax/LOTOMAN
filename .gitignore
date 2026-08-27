@@ -6,3 +6,9 @@ venv/
 # Workbooks generados por --export (la base histórica en data/ SÍ se versiona)
 /*.xlsx
 ~$*.xlsx
+
+# La sonda commitea solo probe/REPORTE.md; el resto es ruido de diagnóstico.
+probe/*
+!probe/REPORTE.md
+veredicto.txt
+probe.log

@@ -116,6 +116,7 @@ def cotejar(html, base, etiqueta):
 def sondear_conectate(salida, base):
     print(f"\n{'=' * 70}\n## CONECTATE.COM\n{'=' * 70}")
     urls = [
+        ("cnt_indice", "https://loterias.conectate.com.do/leidsa/"),
         ("cnt_kino", "https://www.conectate.com.do/loterias/leidsa/super-kino-tv"),
         ("cnt_kino_sub", "https://loterias.conectate.com.do/leidsa/super-kino-tv/"),
         ("cnt_pool", "https://www.conectate.com.do/loterias/leidsa/loto-pool"),
@@ -205,6 +206,18 @@ def main():
     txt = "\n".join(f"[V] {l}" for l in VEREDICTO)
     Path("veredicto.txt").write_text(txt + "\n")
     print(f"\n{'=' * 70}\n@@ VEREDICTO @@\n{'=' * 70}\n{txt}\n{'=' * 70}")
+
+    # Reporte al repo: paginar logs de GitHub para leer 15 líneas sale caro.
+    rep = salida / "REPORTE.md"
+    rep.write_text(
+        "# Sonda de fuentes — último resultado\n\n"
+        "Generado por `.github/workflows/probe-fuentes.yml`. Diagnóstico, no "
+        "toca la base.\n\n"
+        "Criterio: una fuente solo cuenta si alguna de sus secuencias de 20 "
+        "números coincide EXACTO\ncon un sorteo que ya está en la base "
+        "(`MATCH_BASE`). Contar bytes no prueba nada.\n\n"
+        "```\n" + txt + "\n```\n")
+    print(f"reporte -> {rep}")
 
 
 if __name__ == "__main__":

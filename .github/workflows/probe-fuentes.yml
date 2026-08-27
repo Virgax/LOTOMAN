@@ -14,7 +14,7 @@ on:
         type: string
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   sonda:
@@ -48,6 +48,24 @@ jobs:
           echo '================= VEREDICTO ================='
           cat veredicto.txt 2>/dev/null || echo '(la sonda no llegó a escribirlo)'
           echo '============================================'
+
+      # El reporte se commitea para poder leerlo sin escarbar el log del job.
+      - name: Commitear el reporte
+        if: always()
+        run: |
+          set -euo pipefail
+          [[ -f probe/REPORTE.md ]] || { echo 'sin reporte'; exit 0; }
+          git config user.name  'athena-bot'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add -f probe/REPORTE.md
+          git diff --cached --quiet && { echo 'reporte sin cambios'; exit 0; }
+          git commit -m 'sonda: reporte de fuentes'
+          for i in 1 2 3; do
+            git push && exit 0
+            git pull --rebase origin "${GITHUB_REF_NAME}"
+            sleep $((i * 4))
+          done
+          echo '::error::no se pudo pushear el reporte'; exit 1
 
       - name: Publicar en el resumen del job
         if: always()
