@@ -42,6 +42,13 @@ jobs:
           python scripts/probe_fuentes.py --dias "$DIAS" --salida probe \
             2>&1 | tee probe.log
 
+      - name: VEREDICTO
+        if: always()
+        run: |
+          echo '================= VEREDICTO ================='
+          cat veredicto.txt 2>/dev/null || echo '(la sonda no llegó a escribirlo)'
+          echo '============================================'
+
       - name: Publicar en el resumen del job
         if: always()
         run: |
@@ -65,4 +72,5 @@ jobs:
           path: |
             probe/
             probe.log
+            veredicto.txt
           retention-days: 7
