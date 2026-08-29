@@ -30,6 +30,7 @@ Uso:
 import argparse
 import re
 import time
+from html import unescape
 from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import urljoin
@@ -94,8 +95,16 @@ def candidatas(txt):
 
 
 def texto(html):
+    """Texto plano. OJO: hay que desescapar entidades.
+
+    Sin esto, "&#9668;&nbsp;Anterior" deja un &nbsp; literal entre el marcador
+    y la palabra, y cualquier patrón anclado en "Anterior" falla. Ese fue el
+    bug que hizo que el mapeo de cobertura devolviera None para los dos juegos
+    incluso en fechas que sí tienen datos.
+    """
     h = re.sub(r"<(script|style).*?</\1>", " ", html, flags=re.S | re.I)
-    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", h)).strip()
+    h = unescape(re.sub(r"<[^>]+>", " ", h))
+    return re.sub(r"\s+", " ", h).strip()
 
 
 def bajar(url, salida, nombre, timeout=30):
@@ -131,54 +140,77 @@ def cotejar(html, base, etiqueta):
 
 
 # ---------------------------------------------------------------------------
-def mapear_cobertura(salida, desde_anio=1998, hasta_anio=2026):
-    """¿Hasta dónde llega resuloto hacia atrás, para cada juego?
+def mapear_ids_leidsa(salida, por_juego=26):
+    """Mapear la historia real de cada juego usando los IDs de sorteo de Leidsa.
 
-    No se hace búsqueda binaria: la disponibilidad NO es monótona (ya sabemos
-    que faltan días sueltos, como el 2026-06-23 de Kino). Una binaria puede
-    caer justo en un hueco y dar una frontera falsa.
+    POR QUÉ ASÍ Y NO MUESTREANDO FECHAS:
+    Muestrear fechas no distingue "ese día no hubo sorteo" de "la fuente no
+    tiene el dato". Y la cadencia cambió con los años — Jaime recuerda que Kino
+    empezó con 1 o 2 sorteos por semana y hoy es diario, y que Pool era
+    miércoles y sábados. Con muestreo por fecha, una época de 2 sorteos por
+    semana da 0/4 en el muestreo y se lee como "no hay datos", que es falso.
 
-    En su lugar se muestrean 4 días por año — el 15 de enero, abril, julio y
-    octubre — y se cuenta cuántos traen sorteo. Así un hueco suelto no
-    envenena el resultado y se ve la frontera real de la cobertura.
+    Leidsa numera los sorteos secuencialmente: /results/Leidsa/KinoTV/3_6248 es
+    el sorteo 6248 de Kino. Esa numeración ENUMERA los sorteos que existieron,
+    salteándose sola los días sin sorteo. Leyendo la fecha del <title> de una
+    escalera de IDs se obtienen tres cosas de un tiro:
+
+      * el ID 1 -> la fecha del primer sorteo del juego
+      * la curva id vs fecha -> la cadencia en cada época
+      * la pendiente entre IDs vecinos -> sorteos por semana en ese momento
     """
-    print(f"\n{'=' * 70}\n## COBERTURA HACIA ATRÁS en resuloto\n{'=' * 70}")
+    print(f"\n{'=' * 70}\n## HISTORIA REAL vía IDs de sorteo de Leidsa\n{'=' * 70}")
     juegos = {
-        "kino": ("https://www.resuloto.com/do/leid/super-kino-tv-amp.php?fecha={}",
-                 20, 1, 80),
-        "pool": ("https://www.resuloto.com/do/leid/loto-pool-amp.php?fecha={}",
-                 5, 0, 31),
+        "kino": ("https://www.leidsa.com/results/Leidsa/KinoTV/3_{}",
+                 r"KinoTV Resultados \|\s*(\d+)/(\d+)/(\d+)", 6248),
+        "pool": ("https://www.leidsa.com/results/Leidsa/Loto%20Pool/2_{}",
+                 r"Loto Pool Resultados \|\s*(\d+)/(\d+)/(\d+)", 9201),
     }
-    for juego, (url, n_esp, lo, hi) in juegos.items():
-        print(f"\n### {juego}")
-        primero = None
-        for anio in range(desde_anio, hasta_anio + 1):
-            ok = []
-            for mes in (1, 4, 7, 10):
-                d = date(anio, mes, 15)
-                if d > date.today():
-                    continue
-                try:
-                    r = requests.get(url.format(d.isoformat()), headers=UA, timeout=20)
-                except requests.RequestException:
-                    continue
-                if r.status_code != 200:
-                    continue
-                if not r.encoding or r.encoding.lower() in ("iso-8859-1", "latin-1"):
-                    r.encoding = r.apparent_encoding or "utf-8"
-                t = texto(r.text)
-                # Los n números que preceden a la navegación "Anterior".
-                m = re.search(r"((?:\b\d{2}\b\s+){%d})(?:&#9668;|◄)?\s*Anterior" % n_esp, t)
-                if m:
-                    v = [int(x) for x in m.group(1).split()]
-                    if len(set(v)) == n_esp and all(lo <= x <= hi for x in v):
-                        ok.append(d.strftime("%b"))
-                        if primero is None or d < primero:
-                            primero = d
-                time.sleep(0.3)
-            marca = "#" * len(ok) + "." * (4 - len(ok))
-            print(f"   {anio}  {marca}  {len(ok)}/4  {ok}")
-        veredicto(f"{juego}: dato más viejo hallado en el muestreo = {primero}")
+
+    def fecha_de(url_tpl, patron, i):
+        try:
+            r = requests.get(url_tpl.format(i), headers=UA, timeout=20)
+        except requests.RequestException:
+            return None
+        if r.status_code != 200:
+            return None
+        m = re.search(patron, r.text)
+        if not m:
+            return None
+        d, mth, y = (int(x) for x in m.groups())
+        try:
+            return date(y, mth, d)
+        except ValueError:
+            return None
+
+    for juego, (tpl, patron, ancla) in juegos.items():
+        print(f"\n### {juego}  (ancla conocida: id {ancla})")
+        # Escalera de IDs desde 1 hasta el ancla, más allá del ancla para ver
+        # hasta dónde llega hoy.
+        ids = sorted({1, 2, 3} | {round(ancla * k / (por_juego - 6))
+                                  for k in range(1, por_juego - 5)}
+                     | {ancla, ancla + 60, ancla + 200})
+        puntos = []
+        for i in ids:
+            f = fecha_de(tpl, patron, i)
+            print(f"   id {i:>6} -> {f}")
+            if f:
+                puntos.append((i, f))
+            time.sleep(0.2)
+
+        if len(puntos) >= 2:
+            veredicto(f"{juego}: id más bajo con fecha = {puntos[0]}")
+            veredicto(f"{juego}: id más alto con fecha = {puntos[-1]}")
+            print(f"\n   cadencia entre puntos (sorteos por semana):")
+            for (i1, f1), (i2, f2) in zip(puntos, puntos[1:]):
+                dias = (f2 - f1).days
+                if dias > 0:
+                    sem = (i2 - i1) / dias * 7
+                    print(f"     {f1} -> {f2}  ({dias:>5}d, {i2-i1:>5} sorteos)"
+                          f"  = {sem:.2f}/semana")
+                    veredicto(f"{juego} cadencia {f1}..{f2}: {sem:.2f}/semana")
+        else:
+            veredicto(f"{juego}: no se pudo leer ninguna fecha")
 
 
 def sondear_pool_resuloto(salida):
@@ -356,7 +388,7 @@ def main():
     base = base_conocida()
     veredicto(f"base: {len(base):,} sorteos conocidos, último {max(base)}")
 
-    mapear_cobertura(salida)
+    mapear_ids_leidsa(salida)
     if not args.saltar_leidsa:
         sondear_leidsa(salida, base, args.dias)
 
