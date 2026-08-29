@@ -29,6 +29,7 @@ Uso:
 
 import argparse
 import re
+import time
 from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import urljoin
@@ -130,6 +131,56 @@ def cotejar(html, base, etiqueta):
 
 
 # ---------------------------------------------------------------------------
+def mapear_cobertura(salida, desde_anio=1998, hasta_anio=2026):
+    """¿Hasta dónde llega resuloto hacia atrás, para cada juego?
+
+    No se hace búsqueda binaria: la disponibilidad NO es monótona (ya sabemos
+    que faltan días sueltos, como el 2026-06-23 de Kino). Una binaria puede
+    caer justo en un hueco y dar una frontera falsa.
+
+    En su lugar se muestrean 4 días por año — el 15 de enero, abril, julio y
+    octubre — y se cuenta cuántos traen sorteo. Así un hueco suelto no
+    envenena el resultado y se ve la frontera real de la cobertura.
+    """
+    print(f"\n{'=' * 70}\n## COBERTURA HACIA ATRÁS en resuloto\n{'=' * 70}")
+    juegos = {
+        "kino": ("https://www.resuloto.com/do/leid/super-kino-tv-amp.php?fecha={}",
+                 20, 1, 80),
+        "pool": ("https://www.resuloto.com/do/leid/loto-pool-amp.php?fecha={}",
+                 5, 0, 31),
+    }
+    for juego, (url, n_esp, lo, hi) in juegos.items():
+        print(f"\n### {juego}")
+        primero = None
+        for anio in range(desde_anio, hasta_anio + 1):
+            ok = []
+            for mes in (1, 4, 7, 10):
+                d = date(anio, mes, 15)
+                if d > date.today():
+                    continue
+                try:
+                    r = requests.get(url.format(d.isoformat()), headers=UA, timeout=20)
+                except requests.RequestException:
+                    continue
+                if r.status_code != 200:
+                    continue
+                if not r.encoding or r.encoding.lower() in ("iso-8859-1", "latin-1"):
+                    r.encoding = r.apparent_encoding or "utf-8"
+                t = texto(r.text)
+                # Los n números que preceden a la navegación "Anterior".
+                m = re.search(r"((?:\b\d{2}\b\s+){%d})(?:&#9668;|◄)?\s*Anterior" % n_esp, t)
+                if m:
+                    v = [int(x) for x in m.group(1).split()]
+                    if len(set(v)) == n_esp and all(lo <= x <= hi for x in v):
+                        ok.append(d.strftime("%b"))
+                        if primero is None or d < primero:
+                            primero = d
+                time.sleep(0.3)
+            marca = "#" * len(ok) + "." * (4 - len(ok))
+            print(f"   {anio}  {marca}  {len(ok)}/4  {ok}")
+        veredicto(f"{juego}: dato más viejo hallado en el muestreo = {primero}")
+
+
 def sondear_pool_resuloto(salida):
     """Loto Pool en resuloto — la única fuente que ha dado datos verificados.
 
@@ -305,8 +356,7 @@ def main():
     base = base_conocida()
     veredicto(f"base: {len(base):,} sorteos conocidos, último {max(base)}")
 
-    sondear_pool_resuloto(salida)
-    sondear_conectate(salida, base)
+    mapear_cobertura(salida)
     if not args.saltar_leidsa:
         sondear_leidsa(salida, base, args.dias)
 
