@@ -15,10 +15,24 @@ on:
     - cron: '15 10 * * *'
   workflow_dispatch:
     inputs:
-      desde:
-        description: 'Fecha inicial YYYY-MM-DD (vacío = día siguiente al último sorteo en la base)'
+      desde_kino:
+        description: 'Kino: fecha inicial YYYY-MM-DD (vacío = día siguiente al último). Los días ya guardados se saltan sin pedir nada.'
         required: false
         type: string
+      desde_pool:
+        description: 'Loto Pool: fecha inicial YYYY-MM-DD (vacío = día siguiente al último)'
+        required: false
+        type: string
+      saltar_kino:
+        description: 'No tocar Kino en esta corrida'
+        required: false
+        default: false
+        type: boolean
+      saltar_pool:
+        description: 'No tocar Loto Pool en esta corrida'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -31,6 +45,7 @@ concurrency:
 jobs:
   actualizar:
     runs-on: ubuntu-latest
+    timeout-minutes: 330
     defaults:
       run:
         shell: bash
@@ -52,9 +67,10 @@ jobs:
           # el de hoy todavía no existe. Pedirlo solo ensucia el log.
           echo "hasta=$(TZ=America/Santo_Domingo date -d yesterday +%F)" >> "$GITHUB_OUTPUT"
 
-      - name: Traer sorteos nuevos
+      - name: Traer sorteos nuevos de Kino
+        if: ${{ inputs.saltar_kino != true }}
         env:
-          DESDE: ${{ inputs.desde }}
+          DESDE: ${{ inputs.desde_kino }}
           HASTA: ${{ steps.rango.outputs.hasta }}
         run: |
           set -euo pipefail
@@ -67,8 +83,9 @@ jobs:
           python scripts/update_db.py "${args[@]}" 2>&1 | tee update.log
 
       - name: Traer sorteos nuevos de Loto Pool
+        if: ${{ inputs.saltar_pool != true }}
         env:
-          DESDE: ${{ inputs.desde }}
+          DESDE: ${{ inputs.desde_pool }}
           HASTA: ${{ steps.rango.outputs.hasta }}
         run: |
           set -euo pipefail
@@ -89,11 +106,11 @@ jobs:
           {
             echo '## Kino'
             echo '```'
-            grep -E '^[[:space:]]+[+!-] ' update.log || echo '(ninguno)'
+            grep -E '^[[:space:]]+[+!-] ' update.log 2>/dev/null || echo '(no corrió)'
             echo '```'
             echo '## Loto Pool'
             echo '```'
-            grep -E '^[[:space:]]+[+!-] ' update_pool.log || echo '(ninguno)'
+            grep -E '^[[:space:]]+[+!-] ' update_pool.log 2>/dev/null || echo '(no corrió)'
             echo '```'
             echo '## Integridad'
             echo '```'
@@ -111,8 +128,8 @@ jobs:
           git config user.email 'github-actions[bot]@users.noreply.github.com'
           git add data/
 
-          nk=$(grep -cE '^[[:space:]]+\+ ' update.log || true)
-          np=$(grep -cE '^[[:space:]]+\+ ' update_pool.log || true)
+          nk=$(grep -cE '^[[:space:]]+\+ ' update.log 2>/dev/null || true)
+          np=$(grep -cE '^[[:space:]]+\+ ' update_pool.log 2>/dev/null || true)
           git commit -m "datos: +${nk} Kino, +${np} Pool hasta ${{ steps.rango.outputs.hasta }}"
 
           # La rama puede haberse movido mientras corría el scrape.
