@@ -140,77 +140,57 @@ def cotejar(html, base, etiqueta):
 
 
 # ---------------------------------------------------------------------------
-def mapear_ids_leidsa(salida, por_juego=26):
-    """Mapear la historia real de cada juego usando los IDs de sorteo de Leidsa.
+def mapear_eras_resuloto(salida, ventana=14):
+    """¿Hasta dónde llega resuloto, sabiendo que la cadencia cambió?
 
-    POR QUÉ ASÍ Y NO MUESTREANDO FECHAS:
-    Muestrear fechas no distingue "ese día no hubo sorteo" de "la fuente no
-    tiene el dato". Y la cadencia cambió con los años — Jaime recuerda que Kino
-    empezó con 1 o 2 sorteos por semana y hoy es diario, y que Pool era
-    miércoles y sábados. Con muestreo por fecha, una época de 2 sorteos por
-    semana da 0/4 en el muestreo y se lee como "no hay datos", que es falso.
+    Jaime avisó que la frecuencia varió: Kino habría empezado con 1 o 2
+    sorteos por semana y hoy es diario; Pool era miércoles y sábados. Por eso
+    NO se puede muestrear días sueltos: en una época de 2 sorteos por semana,
+    4 fechas al azar dan 0 de 4 y se leería como "la fuente no tiene datos".
 
-    Leidsa numera los sorteos secuencialmente: /results/Leidsa/KinoTV/3_6248 es
-    el sorteo 6248 de Kino. Esa numeración ENUMERA los sorteos que existieron,
-    salteándose sola los días sin sorteo. Leyendo la fecha del <title> de una
-    escalera de IDs se obtienen tres cosas de un tiro:
+    En su lugar se pide una VENTANA de 14 días corridos por época. Catorce días
+    atrapan al menos 2 sorteos aunque la cadencia sea de 1 por semana. Y el
+    conteo dentro de la ventana mide la cadencia de esa época directamente:
 
-      * el ID 1 -> la fecha del primer sorteo del juego
-      * la curva id vs fecha -> la cadencia en cada época
-      * la pendiente entre IDs vecinos -> sorteos por semana en ese momento
+        14/14 sorteos -> diario        4/14 -> 2 por semana
+         2/14         -> 1 por semana  0/14 -> no hay datos ahí
     """
-    print(f"\n{'=' * 70}\n## HISTORIA REAL vía IDs de sorteo de Leidsa\n{'=' * 70}")
+    print(f"\n{'=' * 70}\n## COBERTURA de resuloto por épocas (ventanas de {ventana} días)\n{'=' * 70}")
     juegos = {
-        "kino": ("https://www.leidsa.com/results/Leidsa/KinoTV/3_{}",
-                 r"KinoTV Resultados \|\s*(\d+)/(\d+)/(\d+)", 6248),
-        "pool": ("https://www.leidsa.com/results/Leidsa/Loto%20Pool/2_{}",
-                 r"Loto Pool Resultados \|\s*(\d+)/(\d+)/(\d+)", 9201),
+        "kino": ("https://www.resuloto.com/do/leid/super-kino-tv-amp.php?fecha={}", 20, 1, 80),
+        "pool": ("https://www.resuloto.com/do/leid/loto-pool-amp.php?fecha={}", 5, 0, 31),
     }
+    eras = [date(a, 5, 5) for a in
+            (1998, 2001, 2004, 2007, 2009, 2010, 2012, 2014, 2016, 2019, 2022, 2025)]
 
-    def fecha_de(url_tpl, patron, i):
-        try:
-            r = requests.get(url_tpl.format(i), headers=UA, timeout=20)
-        except requests.RequestException:
-            return None
-        if r.status_code != 200:
-            return None
-        m = re.search(patron, r.text)
-        if not m:
-            return None
-        d, mth, y = (int(x) for x in m.groups())
-        try:
-            return date(y, mth, d)
-        except ValueError:
-            return None
-
-    for juego, (tpl, patron, ancla) in juegos.items():
-        print(f"\n### {juego}  (ancla conocida: id {ancla})")
-        # Escalera de IDs desde 1 hasta el ancla, más allá del ancla para ver
-        # hasta dónde llega hoy.
-        ids = sorted({1, 2, 3} | {round(ancla * k / (por_juego - 6))
-                                  for k in range(1, por_juego - 5)}
-                     | {ancla, ancla + 60, ancla + 200})
-        puntos = []
-        for i in ids:
-            f = fecha_de(tpl, patron, i)
-            print(f"   id {i:>6} -> {f}")
-            if f:
-                puntos.append((i, f))
-            time.sleep(0.2)
-
-        if len(puntos) >= 2:
-            veredicto(f"{juego}: id más bajo con fecha = {puntos[0]}")
-            veredicto(f"{juego}: id más alto con fecha = {puntos[-1]}")
-            print(f"\n   cadencia entre puntos (sorteos por semana):")
-            for (i1, f1), (i2, f2) in zip(puntos, puntos[1:]):
-                dias = (f2 - f1).days
-                if dias > 0:
-                    sem = (i2 - i1) / dias * 7
-                    print(f"     {f1} -> {f2}  ({dias:>5}d, {i2-i1:>5} sorteos)"
-                          f"  = {sem:.2f}/semana")
-                    veredicto(f"{juego} cadencia {f1}..{f2}: {sem:.2f}/semana")
-        else:
-            veredicto(f"{juego}: no se pudo leer ninguna fecha")
+    for juego, (url, n_esp, lo, hi) in juegos.items():
+        print(f"\n### {juego}")
+        pat = re.compile(r"((?:\b\d{2}\b\s+){%d})(?:◄)?\s*Anterior" % n_esp)
+        for era in eras:
+            hallados, dias_sem = 0, []
+            for k in range(ventana):
+                d = era + timedelta(days=k)
+                try:
+                    r = requests.get(url.format(d.isoformat()), headers=UA, timeout=20)
+                except requests.RequestException:
+                    continue
+                if r.status_code != 200:
+                    continue
+                if not r.encoding or r.encoding.lower() in ("iso-8859-1", "latin-1"):
+                    r.encoding = r.apparent_encoding or "utf-8"
+                m = pat.search(texto(r.text))
+                if m:
+                    v = [int(x) for x in m.group(1).split()]
+                    if len(set(v)) == n_esp and all(lo <= x <= hi for x in v):
+                        hallados += 1
+                        dias_sem.append("LMXJVSD"[d.weekday()])
+                time.sleep(0.15)
+            cadencia = hallados / ventana * 7
+            barra = "#" * hallados + "." * (ventana - hallados)
+            print(f"   {era}  {barra}  {hallados:>2}/{ventana}"
+                  f"  ~{cadencia:.1f}/sem  dias={''.join(dias_sem)}")
+            veredicto(f"{juego} {era.year}: {hallados}/{ventana} "
+                      f"(~{cadencia:.1f}/semana) dias={''.join(dias_sem) or '-'}")
 
 
 def sondear_pool_resuloto(salida):
@@ -388,7 +368,7 @@ def main():
     base = base_conocida()
     veredicto(f"base: {len(base):,} sorteos conocidos, último {max(base)}")
 
-    mapear_ids_leidsa(salida)
+    mapear_eras_resuloto(salida)
     if not args.saltar_leidsa:
         sondear_leidsa(salida, base, args.dias)
 
