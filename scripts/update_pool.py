@@ -57,7 +57,7 @@ URL = "https://www.resuloto.com/do/leid/loto-pool-amp.php?fecha={}"
 DIAS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; AthenaAnalytics/4.0)"}
 
-POOL_MIN, POOL_MAX, POOL_N = 0, 31, 5
+POOL_MIN, POOL_MAX, POOL_N = 1, 31, 5   # verificado: el 00 NO sale nunca en 18,600 bolas
 MESES = {m: i + 1 for i, m in enumerate(
     "enero febrero marzo abril mayo junio julio agosto "
     "septiembre octubre noviembre diciembre".split())}
