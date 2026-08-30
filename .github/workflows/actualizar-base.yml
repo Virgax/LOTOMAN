@@ -23,6 +23,10 @@ on:
         description: 'Loto Pool: fecha inicial YYYY-MM-DD (vacío = día siguiente al último)'
         required: false
         type: string
+      hasta:
+        description: 'Fecha final YYYY-MM-DD (vacío = ayer en hora dominicana). Para rellenos por tandas.'
+        required: false
+        type: string
       saltar_kino:
         description: 'No tocar Kino en esta corrida'
         required: false
@@ -61,11 +65,19 @@ jobs:
 
       - name: Calcular hasta qué día pedir
         id: rango
+        env:
+          HASTA_IN: ${{ inputs.hasta }}
         run: |
           set -euo pipefail
-          # "ayer" en hora dominicana: el sorteo de anoche ya está publicado,
-          # el de hoy todavía no existe. Pedirlo solo ensucia el log.
-          echo "hasta=$(TZ=America/Santo_Domingo date -d yesterday +%F)" >> "$GITHUB_OUTPUT"
+          if [[ -n "${HASTA_IN:-}" ]]; then
+            [[ "$HASTA_IN" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] \
+              || { echo "::error::hasta inválido: $HASTA_IN"; exit 1; }
+            echo "hasta=$HASTA_IN" >> "$GITHUB_OUTPUT"
+          else
+            # "ayer" en hora dominicana: el sorteo de anoche ya está publicado,
+            # el de hoy todavía no existe. Pedirlo solo ensucia el log.
+            echo "hasta=$(TZ=America/Santo_Domingo date -d yesterday +%F)" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Traer sorteos nuevos de Kino
         if: ${{ inputs.saltar_kino != true }}
