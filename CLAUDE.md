@@ -325,11 +325,26 @@ aporta valor.**
 12. **Pool era DIARIO en 2016–2018**, no miércoles y sábados: 357 sorteos por
     año, ~6.88/semana, repartidos parejo entre los 7 días. Si hubo una época de
     2 por semana fue antes de 2016, y ahí no hay fuente.
-13. Relleno de Pool hacia atrás, por tandas de ~3 años vía `workflow_dispatch`
-    con `desde_pool` y `hasta`. Frontera de resuloto: **2016-01-02**.
-    Pendientes: los huecos 2026-08-25 y 08-26, y 5 días sueltos sin explicar
-    (2016-05-14/15 — que también falta en Kino, o sea hueco del archivo de
-    resuloto —, 2016-10-11, 2017-09-07, 2017-09-21, 2018-07-05/06).
+13. ~~Relleno de Pool hacia atrás.~~ **HECHO** (2026-08-30, 4 tandas vía
+    `workflow_dispatch` con `desde_pool` y `hasta`). **3,720 sorteos**,
+    2016-01-02 → hoy. 0 filas inválidas. Frontera de resuloto: 2016-01-02.
+14. **Integridad de Pool verificada con la misma prueba que delató las 341
+    filas falsas de Kino.** 49 combinaciones repetidas contra 34.4 esperadas
+    (z=+2.50, ruido de Poisson). Lo decisivo es la separación: **0 de 50 a
+    ≤10 filas de distancia**, mediana 1,108 filas, la más cercana a 11. En
+    Kino 2011 había 230 casos a exactamente 5 filas. Repartidas así son
+    repeticiones legítimas, no errores de captura.
+15. Tramos largos sin sorteo en Pool, contrastados contra Kino:
+
+    | Tramo | Pool | Kino | Lectura |
+    |---|---|---|---|
+    | 2020-03-19 → 06-02 (76d) | 0 | 0 | COVID, suspensión real |
+    | 2020-10-17 → 19 | 0/3 | 3/3 | falta solo en Pool |
+    | 2025-10-22 → 25 | 0/4 | 0/4 | falta en los dos |
+    | 2026-06-25 → 27 | 0/3 | 3/3 | falta solo en Pool |
+
+    Pendiente: los 5 días sueltos de 2016–2018 (2016-05-14/15 — que también
+    falta en Kino —, 2016-10-11, 2017-09-07, 2017-09-21, 2018-07-05/06).
 
 **Si Jaime decide seguir jugando**
 7. La parte útil pasa a ser operativa, no predictiva: control de gasto,
