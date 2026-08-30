@@ -58,7 +58,18 @@ P(10 aciertos) = 1 en 1,646,492,110,120.
 Esto es estructural y no depende del modelo.
 
 ### Reglas operativas conocidas
-- Leidsa **no sortea Jueves Santo ni Viernes Santo** (confirmado en varios años).
+- **Días sin sorteo — son SEIS al año, no dos** (medido sobre Loto Pool
+  2016–2018, tres años seguidos, y coincide con los huecos de Kino):
+
+  | Días | Qué son |
+  |---|---|
+  | Jueves y Viernes Santo | 2016-03-24/25 · 2017-04-13/14 · 2018-03-29/30 |
+  | 24 y 25 de diciembre | Nochebuena y Navidad |
+  | 31 de diciembre y 1 de enero | Fin de año y Año Nuevo |
+
+  Aplica a los dos juegos. El resto del año se sortea **todos los días**,
+  domingos incluidos. Los actualizadores NO rellenan estos días: los dejan
+  como hueco y los reportan.
 - Jaime juega junto a **Irvin**.
 - **Loto Pool: Jaime lo retomó el 2026-08-27**, ya no está descartado. Ojo: lo
   que se descartó fue *jugarlo* (márgenes malos, sin recuperación por cero
@@ -113,9 +124,18 @@ Cada fila de datos:
 
 Las primeras 1–2 filas de cada hoja son títulos; el cargador las salta solo.
 
-**Estado de esta copia:** 5,602 filas crudas / 5,261 únicas,
-`2010-07-19 → 2026-08-25`. El hueco 2026-03-25 → 2026-08-25 lo cerró la
-rutina diaria (+151 sorteos, 0 duplicados nuevos). Ver AUDITORIA.md.
+**Estado de esta copia:** 5,729 filas crudas / 5,388 únicas,
+`2010-07-19 → 2026-08-28`. Completa desde 2016.
+
+Dos huecos grandes que se investigaron y resultaron ser cosas distintas:
+
+| Hueco | Veredicto |
+|---|---|
+| 2020-03-19 → 06-02 (76 días) | **suspensión real** (COVID). resuloto tampoco los tiene. |
+| 2023-03-30 → 07-29 (122 días) | **agujero de captura**. Rellenado: +125 sorteos. |
+
+De 2023 solo quedan fuera el 6 y 7 de abril — Jueves y Viernes Santo.
+Ver AUDITORIA.md.
 
 ⚠️ **Existe una versión más nueva** que Jaime bajó en una sesión posterior:
 5,512 sorteos hasta el **24 de mayo de 2026**, más el workbook
@@ -299,8 +319,17 @@ aporta valor.**
 11. **La regla anti-duplicados de Kino NO se aplica a Pool.** C(32,5)=201,376,
     así que en 5,600 sorteos se esperan **78 repeticiones legítimas**. Pool
     deduplica por FECHA, nunca por números.
-12. Pendiente: histórico de Pool hacia atrás de 2026-07-28. Hay que raspar día
-    a día, en tandas. Y los huecos 2026-08-25 y 08-26, que resuloto no sirvió.
+    Comprobado sobre los primeros 1,101 sorteos: **3 combinaciones repetidas,
+    contra 3.0 esperadas por azar.** Clavado. Copiar la regla de Kino habría
+    borrado esos 3 sorteos reales.
+12. **Pool era DIARIO en 2016–2018**, no miércoles y sábados: 357 sorteos por
+    año, ~6.88/semana, repartidos parejo entre los 7 días. Si hubo una época de
+    2 por semana fue antes de 2016, y ahí no hay fuente.
+13. Relleno de Pool hacia atrás, por tandas de ~3 años vía `workflow_dispatch`
+    con `desde_pool` y `hasta`. Frontera de resuloto: **2016-01-02**.
+    Pendientes: los huecos 2026-08-25 y 08-26, y 5 días sueltos sin explicar
+    (2016-05-14/15 — que también falta en Kino, o sea hueco del archivo de
+    resuloto —, 2016-10-11, 2017-09-07, 2017-09-21, 2018-07-05/06).
 
 **Si Jaime decide seguir jugando**
 7. La parte útil pasa a ser operativa, no predictiva: control de gasto,
