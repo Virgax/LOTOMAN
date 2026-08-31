@@ -1,0 +1,54 @@
+name: Prueba de clima
+
+# Prueba la hipótesis de Jaime: ¿presión, temperatura o humedad a la hora del
+# sorteo influyen en qué números salen? Diagnóstico — no toca las bases.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  clima:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+
+      - name: Bajar el clima histórico de Santo Domingo
+        run: |
+          set -euo pipefail
+          python scripts/clima.py --bajar 2>&1 | tee clima_bajar.log
+
+      - name: Correr las pruebas
+        run: |
+          set -euo pipefail
+          python scripts/clima.py 2>&1 | tee clima.log
+
+      - name: Publicar y commitear
+        if: always()
+        run: |
+          set -euo pipefail
+          { echo '```'; cat clima.log 2>/dev/null || echo '(sin log)'; echo '```'; } \
+            >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p probe
+          { echo '# Prueba de clima vs números'; echo; echo '```';
+            cat clima.log 2>/dev/null; echo '```'; } > probe/CLIMA.md
+          git config user.name  'athena-bot'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add -f probe/CLIMA.md data/clima_santo_domingo.csv
+          git diff --cached --quiet && { echo 'sin cambios'; exit 0; }
+          git commit -m 'clima: histórico de Santo Domingo + resultado de las pruebas'
+          for i in 1 2 3; do
+            git push && exit 0
+            git pull --rebase origin "${GITHUB_REF_NAME}"; sleep $((i*4))
+          done
+          echo '::error::no se pudo pushear'; exit 1
