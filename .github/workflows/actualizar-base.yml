@@ -107,6 +107,22 @@ jobs:
           fi
           python scripts/update_pool.py "${args[@]}" 2>&1 | tee update_pool.log
 
+      # Orden deliberado: primero se traen los sorteos, luego se EVALÚA el
+      # experimento sellado ayer (que ahora ya tiene resultado), y solo al
+      # final se GENERA el de mañana. Así las jugadas siempre quedan
+      # comprometidas antes de que exista el sorteo que intentan predecir.
+      - name: Evaluar el experimento de ayer
+        if: ${{ inputs.saltar_kino != true }}
+        run: |
+          set -euo pipefail
+          python scripts/experimento.py --evaluar 2>&1 | tee experimento.log
+
+      - name: Sellar el experimento de mañana
+        if: ${{ inputs.saltar_kino != true }}
+        run: |
+          set -euo pipefail
+          python scripts/experimento.py --generar 2>&1 | tee -a experimento.log
+
       - name: Auditar integridad después de escribir
         run: |
           set -euo pipefail
@@ -119,6 +135,10 @@ jobs:
             echo '## Kino'
             echo '```'
             grep -E '^[[:space:]]+[+!-] ' update.log 2>/dev/null || echo '(no corrió)'
+            echo '```'
+            echo '## Experimento prospectivo'
+            echo '```'
+            sed -n '/ACUMULADO/,$p' experimento.log 2>/dev/null || echo '(no corrió)'
             echo '```'
             echo '## Loto Pool'
             echo '```'
@@ -138,7 +158,7 @@ jobs:
 
           git config user.name  'athena-bot'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
-          git add data/
+          git add data/ scripts/
 
           nk=$(grep -cE '^[[:space:]]+\+ ' update.log 2>/dev/null || true)
           np=$(grep -cE '^[[:space:]]+\+ ' update_pool.log 2>/dev/null || true)
