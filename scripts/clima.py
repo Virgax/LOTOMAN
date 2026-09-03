@@ -56,29 +56,57 @@ def hora_sorteo(d):
 
 
 def bajar(desde=2010, hasta=2026):
-    """Descarga el clima horario y cachea SOLO la hora del sorteo por día."""
+    """Descarga el clima horario y cachea SOLO la hora del sorteo por día.
+
+    Se pide por SEMESTRES, no por años. Pedir un año entero con tres variables
+    horarias (8,760 x 3 valores) hizo que Open-Meteo pasara de los 120s de
+    timeout y el primer intento murió en 2010 sin bajar nada. Medio año pasa
+    cómodo. Cada tramo reintenta 3 veces con espera creciente, y si uno se cae
+    del todo se anota y se sigue: perder un semestre es mucho mejor que perder
+    la corrida entera.
+    """
+    import time
     import requests
-    filas = {}
-    for anio in range(desde, hasta + 1):
-        fin = f"{anio}-12-31" if anio < hasta else date.today().isoformat()
+
+    filas, fallidos = {}, []
+    tramos = [(a, m) for a in range(desde, hasta + 1) for m in (1, 7)]
+    for anio, mes in tramos:
+        ini = date(anio, mes, 1)
+        fin = date(anio, 6, 30) if mes == 1 else date(anio, 12, 31)
+        if ini > date.today():
+            continue
+        fin = min(fin, date.today())
         url = ("https://archive-api.open-meteo.com/v1/archive"
                f"?latitude={LAT}&longitude={LON}"
-               f"&start_date={anio}-01-01&end_date={fin}"
+               f"&start_date={ini}&end_date={fin}"
                f"&hourly={','.join(VARS)}"
                "&timezone=America%2FSanto_Domingo")
-        print(f"  {anio}...", end=" ", flush=True)
-        r = requests.get(url, timeout=120)
-        r.raise_for_status()
-        h = r.json()["hourly"]
-        for i, t in enumerate(h["time"]):
-            f = date.fromisoformat(t[:10])
-            if int(t[11:13]) != hora_sorteo(f):
-                continue
-            vals = [h[v][i] for v in VARS]
-            if any(v is None for v in vals):
-                continue
-            filas[f] = vals
-        print(f"{len(filas):,} días acumulados")
+
+        for intento in range(1, 4):
+            try:
+                r = requests.get(url, timeout=180)
+                r.raise_for_status()
+                h = r.json()["hourly"]
+                for i, t in enumerate(h["time"]):
+                    f = date.fromisoformat(t[:10])
+                    if int(t[11:13]) != hora_sorteo(f):
+                        continue
+                    vals = [h[v][i] for v in VARS]
+                    if any(v is None for v in vals):
+                        continue
+                    filas[f] = vals
+                print(f"  {ini} -> {fin}  ok   ({len(filas):,} días acumulados)")
+                break
+            except Exception as e:
+                if intento == 3:
+                    print(f"  {ini} -> {fin}  FALLÓ: {type(e).__name__}")
+                    fallidos.append(str(ini))
+                else:
+                    time.sleep(intento * 5)
+        time.sleep(0.5)
+
+    if not filas:
+        sys.exit("No se bajó ni un día de clima. Aborta.")
 
     CACHE.parent.mkdir(parents=True, exist_ok=True)
     with CACHE.open("w", newline="") as fh:
@@ -87,6 +115,8 @@ def bajar(desde=2010, hasta=2026):
         for f in sorted(filas):
             w.writerow([f.isoformat()] + filas[f])
     print(f"\nGuardado: {CACHE}  ({len(filas):,} días)")
+    if fallidos:
+        print(f"Semestres que no se pudieron bajar: {fallidos}")
 
 
 def leer_clima():

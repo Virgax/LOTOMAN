@@ -44,11 +44,14 @@ jobs:
             cat clima.log 2>/dev/null; echo '```'; } > probe/CLIMA.md
           git config user.name  'athena-bot'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
-          git add -f probe/CLIMA.md data/clima_santo_domingo.csv
+          git add -f probe/CLIMA.md data/clima_santo_domingo.csv 2>/dev/null || true
           git diff --cached --quiet && { echo 'sin cambios'; exit 0; }
           git commit -m 'clima: histórico de Santo Domingo + resultado de las pruebas'
+          # La rama se mueve mientras corre (cron diario, otras corridas):
+          # rebasar ANTES del primer intento, no después de fallar.
           for i in 1 2 3; do
+            git pull --rebase origin "${GITHUB_REF_NAME}" || true
             git push && exit 0
-            git pull --rebase origin "${GITHUB_REF_NAME}"; sleep $((i*4))
+            sleep $((i*5))
           done
           echo '::error::no se pudo pushear'; exit 1
