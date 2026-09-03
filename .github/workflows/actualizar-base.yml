@@ -23,6 +23,11 @@ on:
         description: 'Loto Pool: fecha inicial YYYY-MM-DD (vacío = día siguiente al último)'
         required: false
         type: string
+      presupuesto:
+        description: 'Presupuesto diario RD$ para data/jugadas_hoy.json'
+        required: false
+        default: '800'
+        type: string
       hasta:
         description: 'Fecha final YYYY-MM-DD (vacío = ayer en hora dominicana). Para rellenos por tandas.'
         required: false
@@ -123,6 +128,18 @@ jobs:
           set -euo pipefail
           python scripts/experimento.py --generar 2>&1 | tee -a experimento.log
 
+      # El archivo que lee la extensión de Chrome. Se regenera despues de
+      # traer los sorteos, para que el modo modelo use la base al dia.
+      - name: Generar las jugadas del día
+        if: ${{ inputs.saltar_kino != true }}
+        env:
+          PRES: ${{ inputs.presupuesto }}
+        run: |
+          set -euo pipefail
+          PRES="${PRES:-800}"
+          [[ "$PRES" =~ ^[0-9]+$ ]] || { echo "::error::presupuesto inválido"; exit 1; }
+          python scripts/jugadas_hoy.py --presupuesto "$PRES" 2>&1 | tee jugadas.log
+
       - name: Auditar integridad después de escribir
         run: |
           set -euo pipefail
@@ -135,6 +152,10 @@ jobs:
             echo '## Kino'
             echo '```'
             grep -E '^[[:space:]]+[+!-] ' update.log 2>/dev/null || echo '(no corrió)'
+            echo '```'
+            echo '## Jugadas del día'
+            echo '```'
+            cat jugadas.log 2>/dev/null || echo '(no corrió)'
             echo '```'
             echo '## Experimento prospectivo'
             echo '```'

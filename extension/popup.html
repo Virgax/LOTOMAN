@@ -1,0 +1,52 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8">
+<style>
+:root{--bg:#0E1A20;--sf:#17282F;--sf2:#1E333B;--ln:#2C464F;
+      --tx:#E8EDEB;--tx2:#9FB3B2;--tx3:#6E8489;--am:#E8A33D;--tl:#4FB0A5;--rd:#C05746}
+*{box-sizing:border-box}
+body{width:380px;margin:0;padding:14px;background:var(--bg);color:var(--tx);
+ font:14px/1.45 system-ui,-apple-system,sans-serif;display:flex;flex-direction:column;gap:12px}
+h1{margin:0;font-size:15px;letter-spacing:.06em;text-transform:uppercase;color:var(--am)}
+.card{background:var(--sf);border:1px solid var(--ln);border-radius:8px;padding:11px;
+ display:flex;flex-direction:column;gap:9px}
+.row{display:flex;gap:8px;align-items:flex-end}
+.row>*{flex:1}
+label{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--tx3);
+ display:flex;flex-direction:column;gap:4px}
+input{background:var(--sf2);color:var(--tx);border:1px solid var(--ln);
+ border-radius:5px;padding:7px;font:13px ui-monospace,monospace;width:100%}
+button{background:var(--am);color:var(--bg);border:0;border-radius:5px;padding:10px;
+ font:600 12px/1 system-ui;letter-spacing:.07em;text-transform:uppercase;cursor:pointer}
+button.g{background:transparent;color:var(--tx2);border:1px solid var(--ln)}
+button:disabled{opacity:.45;cursor:not-allowed}
+.kv{display:flex;justify-content:space-between;font-size:12px}
+.kv b{font-family:ui-monospace,monospace;font-weight:500}
+.est{font-size:12px;color:var(--tx2);border-left:3px solid var(--ln);padding-left:9px;
+ white-space:pre-wrap;max-height:130px;overflow:auto}
+.est.ok{border-color:var(--tl)} .est.err{border-color:var(--rd);color:var(--rd)}
+.aviso{font-size:11px;color:var(--tx3);border-top:1px solid var(--ln);padding-top:8px;margin:0}
+</style></head><body>
+<h1>Athena Boletos</h1>
+
+<div class="card">
+  <label>Archivo de jugadas (GitHub)
+    <input id="url" spellcheck="false">
+  </label>
+  <div class="row">
+    <button id="cargar" class="g">Cargar jugadas</button>
+    <button id="detectar" class="g">Revisar página</button>
+  </div>
+  <div id="resumen"></div>
+</div>
+
+<div class="card">
+  <div class="row">
+    <label>Cuántas jugadas<input id="n" type="number" min="1" value="0"></label>
+    <label>Pausa (ms)<input id="pausa" type="number" min="40" step="10" value="140"></label>
+  </div>
+  <button id="llenar" disabled>Llenar jugadas</button>
+  <div id="estado" class="est">Carga las jugadas y abre la página del juego.</div>
+</div>
+
+<p class="aviso">Esta extensión <b>no compra</b>. Llena las jugadas y se detiene:
+el botón de jugar lo tocas tú, después de revisar el total en pantalla.</p>
+<script src="popup.js"></script></body></html>

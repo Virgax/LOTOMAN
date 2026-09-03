@@ -65,3 +65,59 @@ plata que se va por un mal clic.
 
 Automatizar compras suele ir contra los términos de servicio de un sitio de
 apuestas. El riesgo concreto es que cierren la cuenta.
+
+---
+
+# Extensión de Chrome v5 (lo que se usa)
+
+Jaime prefiere la extensión sobre el bookmarklet, y con razón: en escritorio es
+más cómoda y no hay que pegar nada en la barra. El bookmarklet y el inspector
+de arriba quedan como alternativa para el teléfono.
+
+## Arquitectura
+
+    rutina diaria (GitHub Actions)
+        -> scripts/jugadas_hoy.py
+        -> data/jugadas_hoy.json   (commiteado al repo)
+                |
+                | raw.githubusercontent.com  (repo publico, sin token)
+                v
+    extension  -> popup.js baja el archivo
+               -> content.js hace los clics en leidsa.com
+
+**La extensión no calcula nada.** Toda la lógica vive en el repo, donde ya
+están athena, la base de 5,392 sorteos y las validaciones. La extensión se
+mantiene tonta a propósito: menos cosas que se rompan cuando Leidsa cambie
+el CSS.
+
+## Instalar
+
+1. `chrome://extensions` -> activar "Modo de desarrollador"
+2. "Cargar descomprimida" -> elegir la carpeta `extension/`
+
+## Usar
+
+1. Entrar a leidsa.com, login y 2FA a mano.
+2. Ir a la página del juego (`/play/draw/leidsa-kinotv`).
+3. Abrir la extensión -> **Cargar jugadas** (baja el archivo del día).
+4. **Revisar página** — confirma que encuentra las 80 bolas y el botón de
+   agregar. Si algo falta, lo dice antes de tocar nada.
+5. **Llenar jugadas** -> pide confirmación con el costo, y llena.
+6. **El botón de jugar lo tocas tú**, después de ver el total en pantalla.
+
+## Lo que NO hace
+
+* No compra. Nunca toca "jugar ahora".
+* No guarda credenciales. Usa la sesión que ya tiene el navegador.
+* No adivina selectores por clase CSS: busca los elementos-hoja cuyo texto es
+  un número en rango y se queda con el grupo más grande. Sobrevive a un
+  rediseño; buscar por clase no.
+
+## Si se rompe
+
+"Revisar página" es el diagnóstico. Si reporta menos bolas de las esperadas o
+no encuentra el botón de agregar, la página cambió — manda ese reporte y se
+ajusta `content.js`.
+
+Subir la pausa (140 ms por defecto) ayuda si la página va lenta: cada clic
+necesita que el framework procese el estado antes del siguiente.

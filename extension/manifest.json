@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Athena Boletos",
+  "version": "5.0.0",
+  "description": "Lee las jugadas del día desde GitHub y las llena en leidsa.com. No compra: eso lo confirmas tú.",
+  "permissions": ["storage", "scripting", "activeTab"],
+  "host_permissions": [
+    "https://www.leidsa.com/*",
+    "https://raw.githubusercontent.com/*"
+  ],
+  "action": { "default_popup": "popup.html", "default_title": "Athena Boletos" },
+  "content_scripts": [
+    {
+      "matches": ["https://www.leidsa.com/play/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
