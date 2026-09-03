@@ -153,11 +153,124 @@ def evaluar():
         print(f"\n   Faltan ~{80-n} sorteos para que esto pueda concluir algo.")
 
 
+def retro(n):
+    """El mismo experimento, pero hacia atrás sobre los últimos n sorteos.
+
+    Estadísticamente equivalente a esperar n días, con una condición que aquí
+    se respeta: para cada sorteo i los puntajes salen de score_numbers(draws,
+    upto=i), o sea SOLO la historia anterior. El modelo nunca ve el sorteo que
+    puntúa.
+
+    No se generan las 3000 jugadas por día — sería la versión cara de medir lo
+    mismo. Lo que decide el experimento es cuántos de los 20 favoritos del
+    modelo salen contra cuántos de los 20 peores, y eso se calcula directo.
+    """
+    draws = load_draws(dedupe=True)
+    ini = len(draws) - n
+    top, bot, alto = [], [], []
+    for i in range(ini, len(draws)):
+        sc = score_numbers(draws, upto=i)
+        orden = sorted(range(1, POOL + 1), key=lambda x: -sc[x]["score"])
+        salieron = draws[i][1]
+        top.append(len(set(orden[:20]) & salieron))
+        bot.append(len(set(orden[-20:]) & salieron))
+        alto.append(len(set(orden[:10]) & salieron))
+
+    import math
+    def resumen(v, esp, etq):
+        m = sum(v) / len(v)
+        sd = math.sqrt(sum((x - m) ** 2 for x in v) / (len(v) - 1))
+        se = sd / math.sqrt(len(v))
+        z = (m - esp) / se
+        print(f"   {etq:<22} {m:>7.3f}   esperado {esp:.3f}   "
+              f"IC95 [{m-1.96*se:.3f}, {m+1.96*se:.3f}]   z={z:+.2f}")
+        return m, se
+
+    print(f"\n{'='*74}")
+    print(f"WALK-FORWARD sobre los últimos {n} sorteos "
+          f"({draws[ini][0]} → {draws[-1][0]})")
+    print(f"{'='*74}\n")
+    mt, st = resumen(top, 5.0, "top-20 del modelo")
+    mb, sb = resumen(bot, 5.0, "bottom-20 (anti)")
+    ma, sa = resumen(alto, 2.5, "top-10 del modelo")
+
+    dif = mt - mb
+    sed = math.sqrt(st**2 + sb**2)
+    print(f"\n   modelo - anti = {dif:+.3f}   SE {sed:.3f}   z={dif/sed:+.2f}   "
+          f"{'SIGNIFICATIVO' if abs(dif/sed) > 1.96 else 'no significativo'}")
+    print(f"   (si el modelo tuviera la ventaja que lo haría rentable,")
+    print(f"    esta diferencia sería de +0.74 y saldría z={0.74/sed:+.1f})")
+
+
+def curso(w=700):
+    """La diferencia modelo-anti en ventanas CONSECUTIVAS que no se solapan.
+
+    Es el diagnóstico que decide, y nació de un error metodológico propio: al
+    mirar los últimos 80 / 400 / 1600 sorteos, la diferencia se derrumbaba
+    (0.463 -> 0.205 -> 0.122) mientras el z subía (1.67 -> 1.77 -> 2.09). Eso
+    pasa porque las muestras están ANIDADAS —los 80 viven dentro de los 400—
+    así que no son tres pruebas, es una mirada repetida al mismo dato. Elegir
+    el tamaño que cruza 1.96 y reportarlo es el mecanismo exacto que fabricó
+    el falso ciclo-5.
+
+    Ventanas consecutivas sin solape sí son independientes. Resultado sobre
+    5,392 sorteos, ventanas de 700:
+
+        2012-09 -> 2014-09   -0.023     2020-10 -> 2022-09   -0.041
+        2014-09 -> 2016-08   -0.130     2022-09 -> 2024-09   +0.151
+        2016-08 -> 2018-08   +0.020     2024-09 -> 2026-09   +0.191
+        2018-08 -> 2020-09   +0.020
+
+    Media +0.027, cuatro de siete positivas: eso es azar. PERO las dos más
+    positivas son las dos últimas, y que eso pase por casualidad tiene ~5%.
+    Queda abierto, y no se puede cerrar mirando más veces estos mismos datos:
+    lo resuelve el experimento sellado de --generar, que compromete las
+    jugadas antes de que exista el sorteo.
+
+    Referencia económica: +0.74 es lo que haría falta para empatar el EV.
+    Incluso +0.224 solo baja la ventaja de la casa de 32.5% a 15.3%.
+    """
+    import math
+    draws = load_draws(dedupe=True)
+    N = len(draws)
+    print(f"Base {N:,} sorteos. Ventanas consecutivas de {w}, sin solape:\n")
+    print(f"   {'periodo':<26} {'top20':>7} {'anti':>7} {'dif':>8} {'z':>7}")
+    difs = []
+    i = N - (N - 300) // w * w
+    while i + w <= N:
+        top, bot = [], []
+        for j in range(i, i + w):
+            sc = score_numbers(draws, upto=j)
+            o = sorted(range(1, POOL + 1), key=lambda x: -sc[x]["score"])
+            s_ = draws[j][1]
+            top.append(len(set(o[:20]) & s_))
+            bot.append(len(set(o[-20:]) & s_))
+        mt, mb = sum(top) / w, sum(bot) / w
+        st = math.sqrt(sum((x - mt) ** 2 for x in top) / (w - 1)) / math.sqrt(w)
+        sb = math.sqrt(sum((x - mb) ** 2 for x in bot) / (w - 1)) / math.sqrt(w)
+        d = mt - mb
+        se = math.sqrt(st * st + sb * sb)
+        print(f"   {str(draws[i][0])+' -> '+str(draws[i+w-1][0]):<26} "
+              f"{mt:>7.3f} {mb:>7.3f} {d:>+8.3f} {d/se:>+7.2f}")
+        difs.append(d)
+        i += w
+    print(f"\n   positivas: {sum(1 for d in difs if d>0)} de {len(difs)}   "
+          f"media {sum(difs)/len(difs):+.3f}")
+    print(f"   (azar puro: ~la mitad positivas, media ~0.000)")
+    print(f"   (para empatar el EV harían falta +0.740)")
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--generar", action="store_true")
     ap.add_argument("--evaluar", action="store_true")
+    ap.add_argument("--retro", type=int, metavar="N",
+                    help="replay walk-forward sobre los últimos N sorteos")
+    ap.add_argument("--curso", type=int, nargs="?", const=700, metavar="W",
+                    help="ventanas consecutivas de W, sin solape (el que decide)")
     a = ap.parse_args()
     if a.generar: generar()
     elif a.evaluar: evaluar()
+    elif a.retro: retro(a.retro)
+    elif a.curso: curso(a.curso)
     else: ap.print_help()
